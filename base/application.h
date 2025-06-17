@@ -8,12 +8,14 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include "input.h"
+#include "utility.hpp"
 
 class Application
 {
 private:
 	VkInstance _instance;
 	VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
+	VkDevice _device;
 	void createInstance();
 
 public:
@@ -29,9 +31,11 @@ public:
 	// check if validation layers are supported
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 
-	void selectPhysicalDevice(uint32_t &deviceIndex);
+	void selectPhysicalDevice(uint32_t deviceIndex = 0);
 
-	bool isDeviceSuitable(const VkPhysicalDevice& device);
+	void createLogicalDevice();
+
+	static bool isDeviceSuitable(const VkPhysicalDevice &device);
 
 protected:
 	/* window info */

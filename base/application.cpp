@@ -1,10 +1,35 @@
 #include "application.h"
 
-bool Application::isDeviceSuitable(const VkPhysicalDevice& device){
-
+void Application::createLogicalDevice()
+{
+	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(_physicalDevice);
+	VkDeviceQueueCreateInfo queueCreateInfo = {};
+	float queuePriority = 1.0f;
+	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+	queueCreateInfo.queueCount = 1;
+	queueCreateInfo.pQueuePriorities = &queuePriority;
 };
 
-void Application::selectPhysicalDevice(uint32_t &deviceIndex){
+bool Application::isDeviceSuitable(const VkPhysicalDevice &device)
+{
+	// we can query the device properties and features to check if it is suitable
+	VkPhysicalDeviceProperties deviceProperties;
+	vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+	VkPhysicalDeviceFeatures deviceFeatures;
+	vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(device);
+	if (!indices.isComplete())
+		return false;
+
+	// return deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU || deviceFeatures.geometryShader;
+	return true;
+};
+
+void Application::selectPhysicalDevice(uint32_t deviceIndex)
+{
 	std::vector<VkPhysicalDevice> devices;
 	uint32_t deviceCount = 0;
 	vkEnumeratePhysicalDevices(_instance, &deviceCount, nullptr);
@@ -22,7 +47,7 @@ void Application::selectPhysicalDevice(uint32_t &deviceIndex){
 	}
 
 	VkPhysicalDevice device = devices[deviceIndex];
-	if (!isDeviceSuitable(device)||device == VK_NULL_HANDLE)
+	if (!isDeviceSuitable(device) || device == VK_NULL_HANDLE)
 	{
 		throw std::runtime_error("selected device is not suitable or is null!");
 	}
@@ -53,10 +78,10 @@ void Application::createInstance()
 #ifdef __APPLE__
 	// MoltenVK required extensions
 	std::vector<const char *> extensions = {
-		VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
-	};
+		VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME};
 
-	for (uint32_t i = 0; i < glfwExtensionCount; i++) {
+	for (uint32_t i = 0; i < glfwExtensionCount; i++)
+	{
 		extensions.emplace_back(glfwExtensions[i]);
 	}
 
@@ -68,13 +93,11 @@ void Application::createInstance()
 	createInfo.ppEnabledExtensionNames = glfwExtensions;
 #endif
 
-
 #ifdef _DEBUG
 	std::cout << "Checking validation layer support..." << std::endl;
 
 	const std::vector<const char *> validationLayers = {
-		"VK_LAYER_KHRONOS_validation"
-	};
+		"VK_LAYER_KHRONOS_validation"};
 
 	if (!checkValidationLayerSupport(validationLayers))
 	{
@@ -89,14 +112,14 @@ void Application::createInstance()
 	createInfo.enabledLayerCount = 0;
 #endif
 
-
 	if (vkCreateInstance(&createInfo, nullptr, &_instance) != VK_SUCCESS)
 	{
 		throw std::runtime_error("failed to create instance!");
 	}
 };
 
-bool Application::checkValidationLayerSupport(const std::vector<const char *> &validationLayers){
+bool Application::checkValidationLayerSupport(const std::vector<const char *> &validationLayers)
+{
 	uint32_t layerCount;
 	vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
 
@@ -104,12 +127,14 @@ bool Application::checkValidationLayerSupport(const std::vector<const char *> &v
 	vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
 
 	return std::all_of(validationLayers.begin(), validationLayers.end(),
-		[&availableLayers](const char* layerName) {
-			return std::any_of(availableLayers.begin(), availableLayers.end(),
-				[layerName](const VkLayerProperties& layer) {
-					return strcmp(layerName, layer.layerName) == 0;
-				});
-		});
+					   [&availableLayers](const char *layerName)
+					   {
+						   return std::any_of(availableLayers.begin(), availableLayers.end(),
+											  [layerName](const VkLayerProperties &layer)
+											  {
+												  return strcmp(layerName, layer.layerName) == 0;
+											  });
+					   });
 }
 
 void Application::checkInstanceExtensionSupport()
@@ -150,6 +175,7 @@ Application::Application()
 
 	// Loading vulkan instance
 	createInstance();
+	selectPhysicalDevice();
 
 	// GLFW callbacks registration
 	int width, height;
@@ -163,12 +189,12 @@ Application::Application()
 }
 
 Application::~Application()
-{	
+{
 	if (_instance != nullptr)
 	{
 		vkDestroyInstance(_instance, nullptr);
 	}
-	
+
 	if (_window != nullptr)
 	{
 		glfwDestroyWindow(_window);
