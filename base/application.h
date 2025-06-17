@@ -13,6 +13,7 @@ class Application
 {
 private:
 	VkInstance _instance;
+	VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
 	void createInstance();
 
 public:
@@ -24,6 +25,13 @@ public:
 
 	// print all instance extensions
 	void checkInstanceExtensionSupport();
+
+	// check if validation layers are supported
+	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
+
+	void selectPhysicalDevice(uint32_t &deviceIndex);
+
+	bool isDeviceSuitable(const VkPhysicalDevice& device);
 
 protected:
 	/* window info */

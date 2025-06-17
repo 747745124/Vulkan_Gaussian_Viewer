@@ -1,5 +1,36 @@
 #include "application.h"
 
+bool Application::isDeviceSuitable(const VkPhysicalDevice& device){
+
+};
+
+void Application::selectPhysicalDevice(uint32_t &deviceIndex){
+	std::vector<VkPhysicalDevice> devices;
+	uint32_t deviceCount = 0;
+	vkEnumeratePhysicalDevices(_instance, &deviceCount, nullptr);
+	devices.resize(deviceCount);
+	vkEnumeratePhysicalDevices(_instance, &deviceCount, devices.data());
+
+	if (deviceCount == 0)
+	{
+		throw std::runtime_error("failed to find GPUs with Vulkan support!");
+	}
+
+	if (deviceIndex >= deviceCount)
+	{
+		throw std::runtime_error("invalid device index!");
+	}
+
+	VkPhysicalDevice device = devices[deviceIndex];
+	if (!isDeviceSuitable(device)||device == VK_NULL_HANDLE)
+	{
+		throw std::runtime_error("selected device is not suitable or is null!");
+	}
+
+	_physicalDevice = device;
+	return;
+};
+
 void Application::createInstance()
 {
 	VkApplicationInfo appInfo = {};
@@ -36,14 +67,50 @@ void Application::createInstance()
 	createInfo.enabledExtensionCount = glfwExtensionCount;
 	createInfo.ppEnabledExtensionNames = glfwExtensions;
 #endif
-	// Leave it for now
+
+
+#ifdef _DEBUG
+	std::cout << "Checking validation layer support..." << std::endl;
+
+	const std::vector<const char *> validationLayers = {
+		"VK_LAYER_KHRONOS_validation"
+	};
+
+	if (!checkValidationLayerSupport(validationLayers))
+	{
+		throw std::runtime_error("validation layers requested, but not available!");
+	}
+
+	createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+	createInfo.ppEnabledLayerNames = validationLayers.data();
+
+#else
+	// skip the validation layers
 	createInfo.enabledLayerCount = 0;
+#endif
+
 
 	if (vkCreateInstance(&createInfo, nullptr, &_instance) != VK_SUCCESS)
 	{
 		throw std::runtime_error("failed to create instance!");
 	}
 };
+
+bool Application::checkValidationLayerSupport(const std::vector<const char *> &validationLayers){
+	uint32_t layerCount;
+	vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+
+	std::vector<VkLayerProperties> availableLayers(layerCount);
+	vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+	return std::all_of(validationLayers.begin(), validationLayers.end(),
+		[&availableLayers](const char* layerName) {
+			return std::any_of(availableLayers.begin(), availableLayers.end(),
+				[layerName](const VkLayerProperties& layer) {
+					return strcmp(layerName, layer.layerName) == 0;
+				});
+		});
+}
 
 void Application::checkInstanceExtensionSupport()
 {
@@ -52,7 +119,7 @@ void Application::checkInstanceExtensionSupport()
 
 	std::vector<VkExtensionProperties> availableExtensions(extensionCount);
 	vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, availableExtensions.data());
-	
+
 	for (const auto &extension : availableExtensions)
 	{
 		std::cout << extension.extensionName << std::endl;
@@ -96,7 +163,12 @@ Application::Application()
 }
 
 Application::~Application()
-{
+{	
+	if (_instance != nullptr)
+	{
+		vkDestroyInstance(_instance, nullptr);
+	}
+	
 	if (_window != nullptr)
 	{
 		glfwDestroyWindow(_window);

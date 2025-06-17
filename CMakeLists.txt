@@ -28,6 +28,11 @@ target_include_directories(Triangle PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# Add debug definitions
+target_compile_definitions(Triangle PRIVATE
+    $<$<CONFIG:Debug>:_DEBUG>
+)
+
 # Link libraries
 target_link_libraries(Triangle PRIVATE
     Vulkan::Vulkan
