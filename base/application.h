@@ -10,13 +10,31 @@
 #include "input.h"
 #include "utility.hpp"
 
+#ifdef _WIN32
+#define VK_USE_PLATFORM_WIN32_KHR
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif __APPLE__
+#define VK_USE_PLATFORM_MACOS_MVK
+#define GLFW_EXPOSE_NATIVE_COCOA
+#include <vulkan/vulkan_macos.h>
+#include <vulkan/vulkan_beta.h>
+#elif __linux__
+#define VK_USE_PLATFORM_XLIB_KHR
+#define GLFW_EXPOSE_NATIVE_X11
+#endif
+
+#include <GLFW/glfw3native.h>
+
 class Application
 {
 private:
 	VkInstance _instance;
 	VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
 	VkDevice _device;
+	VkQueue _graphicsQueue;
+	VkSurfaceKHR _surface;
 	void createInstance();
+	void createSurface();
 
 public:
 	Application();
