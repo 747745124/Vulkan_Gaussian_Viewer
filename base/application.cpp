@@ -40,34 +40,40 @@ bool Application::checkDeviceExtensionSupport(const VkPhysicalDevice &device, co
 void Application::createLogicalDevice()
 {
 	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(_physicalDevice, _surface);
-	VkDeviceQueueCreateInfo queueCreateInfo = {};
+	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+	std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
 	float queuePriority = 1.0f;
-	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
-	queueCreateInfo.queueCount = 1;
-	queueCreateInfo.pQueuePriorities = &queuePriority;
+
+	for (uint32_t queueFamily : uniqueQueueFamilies)
+	{
+		VkDeviceQueueCreateInfo queueCreateInfo = {};
+		queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		queueCreateInfo.queueFamilyIndex = queueFamily;
+		queueCreateInfo.queueCount = 1;
+		queueCreateInfo.pQueuePriorities = &queuePriority;
+		queueCreateInfos.push_back(queueCreateInfo);
+	}
 
 	// Enable features
 	VkPhysicalDeviceFeatures deviceFeatures = {};
 
 	VkDeviceCreateInfo createInfo = {};
 	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-	createInfo.pQueueCreateInfos = &queueCreateInfo;
-	createInfo.queueCreateInfoCount = 1;
+	createInfo.pQueueCreateInfos = queueCreateInfos.data();
+	createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
 	createInfo.pEnabledFeatures = &deviceFeatures;
+
+	std::vector<const char *> deviceExtensions = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
 #ifdef __APPLE__
 	// Required extensions for macOS
-	const std::vector<const char *> deviceExtensions = {
-		VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME};
-
+	deviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
 	checkDeviceExtensionSupport(_physicalDevice, deviceExtensions);
+#endif
 
 	createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
 	createInfo.ppEnabledExtensionNames = deviceExtensions.data();
-#else
-	createInfo.enabledExtensionCount = 0;
-#endif
 
 	VkResult result = vkCreateDevice(_physicalDevice, &createInfo, nullptr, &_device);
 	if (result != VK_SUCCESS)
@@ -75,8 +81,9 @@ void Application::createLogicalDevice()
 		throw std::runtime_error("failed to create logical device! Error code: " + std::to_string(result));
 	}
 
-	// Get the graphics queue handle from the device
+	// Get the graphics and present queue handles from the device
 	vkGetDeviceQueue(_device, indices.graphicsFamily.value(), 0, &_graphicsQueue);
+	vkGetDeviceQueue(_device, indices.presentFamily.value(), 0, &_presentQueue);
 };
 
 bool Application::isDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surface)
@@ -89,7 +96,8 @@ bool Application::isDeviceSuitable(const VkPhysicalDevice &device, const VkSurfa
 	vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
 
 	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(device, _surface);
-	if (!indices.isComplete())
+
+	if (!indices.isComplete() || !Utils::isSwapChainSuitable(device, _surface))
 		return false;
 
 	// return deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU || deviceFeatures.geometryShader;
@@ -298,6 +306,8 @@ Application::Application()
 	selectPhysicalDevice();
 	createLogicalDevice();
 
+	Utils::createSwapChain(_physicalDevice, _device, _surface, _window, _swapChain, _swapChainImages, _swapChainImageFormat, _swapChainExtent);
+	Utils::createImageViews(_device, _swapChainImages, _swapChainImageFormat, _swapChainImageViews);
 	// GLFW callbacks registration
 	int width, height;
 	glfwGetFramebufferSize(_window, &width, &height);
@@ -311,6 +321,16 @@ Application::Application()
 
 Application::~Application()
 {
+	for (auto imageView : _swapChainImageViews)
+	{
+		vkDestroyImageView(_device, imageView, nullptr);
+	}
+
+	if (_swapChain != nullptr)
+	{
+		vkDestroySwapchainKHR(_device, _swapChain, nullptr);
+	}
+
 	if (_device != nullptr)
 	{
 		vkDestroyDevice(_device, nullptr);

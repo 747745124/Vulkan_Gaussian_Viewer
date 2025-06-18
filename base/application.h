@@ -7,8 +7,10 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
+#include <set>
 #include "input.h"
 #include "utility.hpp"
+#include "swapChainUtils.hpp"
 
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -33,7 +35,16 @@ private:
 	VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
 	VkDevice _device;
 	VkQueue _graphicsQueue;
+	VkQueue _presentQueue;
 	VkSurfaceKHR _surface;
+
+	VkSwapchainKHR _swapChain;
+	std::vector<VkImage> _swapChainImages;
+	VkFormat _swapChainImageFormat;
+	VkExtent2D _swapChainExtent;
+
+	std::vector<VkImageView> _swapChainImageViews;
+
 	void createInstance();
 	void createSurface();
 	void selectPhysicalDevice(uint32_t deviceIndex = 0);

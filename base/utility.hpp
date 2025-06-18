@@ -6,6 +6,9 @@
 #include <vulkan/vulkan.h>
 #include <optional>
 #include <GLFW/glfw3.h>
+#include <cstdint>
+#include <limits>
+#include <algorithm>
 
 struct QueueFamilyIndices
 {
