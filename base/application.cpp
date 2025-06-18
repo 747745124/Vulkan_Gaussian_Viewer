@@ -204,12 +204,26 @@ void Application::createSurface()
 	}
 #elif __APPLE__
 	VkMacOSSurfaceCreateInfoMVK createInfo = {};
+
+	id windowHandle = glfwGetCocoaWindow(_window);
+	id viewHandle = getViewFromNSWindowPointer(windowHandle);
 	createInfo.sType = VK_STRUCTURE_TYPE_MACOS_SURFACE_CREATE_INFO_MVK;
-	createInfo.pView = glfwGetCocoaWindow(_window);
+	createInfo.pView = viewHandle;
+	createInfo.flags = 0;
+	createInfo.pNext = nullptr;
+	PFN_vkCreateMacOSSurfaceMVK vkCreateMacOSSurfaceMVK;
+	vkCreateMacOSSurfaceMVK = (PFN_vkCreateMacOSSurfaceMVK)vkGetInstanceProcAddr(_instance, "vkCreateMacOSSurfaceMVK");
+
+	if (!vkCreateMacOSSurfaceMVK)
+	{
+		throw std::runtime_error("Unabled to get pointer to function: vkCreateMacOSSurfaceMVK");
+	}
+
 	if (vkCreateMacOSSurfaceMVK(_instance, &createInfo, nullptr, &_surface) != VK_SUCCESS)
 	{
-		throw std::runtime_error("failed to create window surface!");
+		throw std::runtime_error("failed to create surface!");
 	}
+
 #elif __linux__
 	VkXlibSurfaceCreateInfoKHR createInfo = {};
 	createInfo.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;

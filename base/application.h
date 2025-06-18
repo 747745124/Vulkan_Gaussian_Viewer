@@ -18,6 +18,7 @@
 #define GLFW_EXPOSE_NATIVE_COCOA
 #include <vulkan/vulkan_macos.h>
 #include <vulkan/vulkan_beta.h>
+#include "ObjC-interface.h"
 #elif __linux__
 #define VK_USE_PLATFORM_XLIB_KHR
 #define GLFW_EXPOSE_NATIVE_X11
