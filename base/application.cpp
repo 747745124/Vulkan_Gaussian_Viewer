@@ -1,8 +1,45 @@
 #include "application.h"
 
+bool Application::checkDeviceExtensionSupport(const VkPhysicalDevice &device, const std::vector<const char *> &requiredExtensions)
+{
+	uint32_t extensionCount;
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+	std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+	std::cout << "Checking device extension support..." << std::endl;
+
+#ifdef _VERBOSE
+	std::cout << "Available device extensions:" << std::endl;
+	for (const auto &extension : availableExtensions)
+	{
+		std::cout << "\t" << extension.extensionName << std::endl;
+	}
+#endif
+
+	// Check if all required extensions are available
+	bool allExtensionsSupported = std::all_of(requiredExtensions.begin(), requiredExtensions.end(),
+											  [&availableExtensions](const char *requiredExtension)
+											  {
+												  return std::any_of(availableExtensions.begin(), availableExtensions.end(),
+																	 [requiredExtension](const VkExtensionProperties &availableExtension)
+																	 {
+																		 return strcmp(requiredExtension, availableExtension.extensionName) == 0;
+																	 });
+											  });
+
+	if (!allExtensionsSupported)
+	{
+		throw std::runtime_error("Required device extension not available");
+	}
+
+	std::cout << "All required device extensions are available" << std::endl;
+	return true;
+}
+
 void Application::createLogicalDevice()
 {
-	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(_physicalDevice);
+	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(_physicalDevice, _surface);
 	VkDeviceQueueCreateInfo queueCreateInfo = {};
 	float queuePriority = 1.0f;
 	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -22,38 +59,9 @@ void Application::createLogicalDevice()
 #ifdef __APPLE__
 	// Required extensions for macOS
 	const std::vector<const char *> deviceExtensions = {
-		VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
 		VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME};
 
-	// Check if required extensions are supported
-	uint32_t extensionCount;
-	vkEnumerateDeviceExtensionProperties(_physicalDevice, nullptr, &extensionCount, nullptr);
-	std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-	vkEnumerateDeviceExtensionProperties(_physicalDevice, nullptr, &extensionCount, availableExtensions.data());
-
-	std::cout << "Available device extensions:" << std::endl;
-	for (const auto &extension : availableExtensions)
-	{
-		std::cout << "\t" << extension.extensionName << std::endl;
-	}
-
-	// Verify all required extensions are available
-	for (const auto &requiredExtension : deviceExtensions)
-	{
-		bool found = false;
-		for (const auto &availableExtension : availableExtensions)
-		{
-			if (strcmp(requiredExtension, availableExtension.extensionName) == 0)
-			{
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-		{
-			throw std::runtime_error(std::string("Required device extension not available: ") + requiredExtension);
-		}
-	}
+	checkDeviceExtensionSupport(_physicalDevice, deviceExtensions);
 
 	createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
 	createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -71,7 +79,7 @@ void Application::createLogicalDevice()
 	vkGetDeviceQueue(_device, indices.graphicsFamily.value(), 0, &_graphicsQueue);
 };
 
-bool Application::isDeviceSuitable(const VkPhysicalDevice &device)
+bool Application::isDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surface)
 {
 	// we can query the device properties and features to check if it is suitable
 	VkPhysicalDeviceProperties deviceProperties;
@@ -80,7 +88,7 @@ bool Application::isDeviceSuitable(const VkPhysicalDevice &device)
 	VkPhysicalDeviceFeatures deviceFeatures;
 	vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
 
-	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(device);
+	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(device, _surface);
 	if (!indices.isComplete())
 		return false;
 
@@ -107,7 +115,7 @@ void Application::selectPhysicalDevice(uint32_t deviceIndex)
 	}
 
 	VkPhysicalDevice device = devices[deviceIndex];
-	if (!isDeviceSuitable(device) || device == VK_NULL_HANDLE)
+	if (!isDeviceSuitable(device, _surface) || device == VK_NULL_HANDLE)
 	{
 		throw std::runtime_error("selected device is not suitable or is null!");
 	}
@@ -140,7 +148,8 @@ void Application::createInstance()
 	std::vector<const char *> extensions = {
 		VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
 		VK_MVK_MACOS_SURFACE_EXTENSION_NAME,
-		VK_KHR_SURFACE_EXTENSION_NAME};
+		VK_KHR_SURFACE_EXTENSION_NAME,
+		VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
 
 	for (uint32_t i = 0; i < glfwExtensionCount; i++)
 	{
@@ -165,6 +174,8 @@ void Application::createInstance()
 	{
 		throw std::runtime_error("validation layers requested, but not available!");
 	}
+
+	std::cout << "Validation layers supported" << std::endl;
 
 	createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
 	createInfo.ppEnabledLayerNames = validationLayers.data();
@@ -192,7 +203,22 @@ void Application::createSurface()
 		throw std::runtime_error("failed to create window surface!");
 	}
 #elif __APPLE__
-
+	VkMacOSSurfaceCreateInfoMVK createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_MACOS_SURFACE_CREATE_INFO_MVK;
+	createInfo.pView = glfwGetCocoaWindow(_window);
+	if (vkCreateMacOSSurfaceMVK(_instance, &createInfo, nullptr, &_surface) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create window surface!");
+	}
+#elif __linux__
+	VkXlibSurfaceCreateInfoKHR createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
+	createInfo.dpy = glfwGetX11Display();
+	createInfo.window = glfwGetX11Window(_window);
+	if (vkCreateXlibSurfaceKHR(_instance, &createInfo, nullptr, &_surface) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create window surface!");
+	}
 #endif
 }
 
@@ -215,7 +241,7 @@ bool Application::checkValidationLayerSupport(const std::vector<const char *> &v
 					   });
 }
 
-void Application::checkInstanceExtensionSupport()
+void Application::printInstanceExtensionSupport()
 {
 	uint32_t extensionCount = 0;
 	vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
@@ -254,6 +280,7 @@ Application::Application()
 	// Loading vulkan instance
 	createInstance();
 	createSurface();
+
 	selectPhysicalDevice();
 	createLogicalDevice();
 
@@ -270,11 +297,6 @@ Application::Application()
 
 Application::~Application()
 {
-	if (_instance != nullptr)
-	{
-		vkDestroyInstance(_instance, nullptr);
-	}
-
 	if (_device != nullptr)
 	{
 		vkDestroyDevice(_device, nullptr);
@@ -284,6 +306,16 @@ Application::~Application()
 	{
 		glfwDestroyWindow(_window);
 		_window = nullptr;
+	}
+
+	if (_surface != nullptr)
+	{
+		vkDestroySurfaceKHR(_instance, _surface, nullptr);
+	}
+
+	if (_instance != nullptr)
+	{
+		vkDestroyInstance(_instance, nullptr);
 	}
 
 	glfwTerminate();

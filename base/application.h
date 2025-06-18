@@ -35,6 +35,13 @@ private:
 	VkSurfaceKHR _surface;
 	void createInstance();
 	void createSurface();
+	void selectPhysicalDevice(uint32_t deviceIndex = 0);
+	void createLogicalDevice();
+
+	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
+	void printInstanceExtensionSupport();
+	bool checkDeviceExtensionSupport(const VkPhysicalDevice &device, const std::vector<const char *> &requiredExtensions);
+	bool isDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surface);
 
 public:
 	Application();
@@ -42,18 +49,6 @@ public:
 	virtual ~Application();
 
 	void run();
-
-	// print all instance extensions
-	void checkInstanceExtensionSupport();
-
-	// check if validation layers are supported
-	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
-
-	void selectPhysicalDevice(uint32_t deviceIndex = 0);
-
-	void createLogicalDevice();
-
-	static bool isDeviceSuitable(const VkPhysicalDevice &device);
 
 protected:
 	/* window info */
