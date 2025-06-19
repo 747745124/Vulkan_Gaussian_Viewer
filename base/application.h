@@ -11,6 +11,7 @@
 #include "input.h"
 #include "utility.hpp"
 #include "swapChainUtils.hpp"
+#include "shaderUtils.hpp"
 
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -42,13 +43,18 @@ private:
 	std::vector<VkImage> _swapChainImages;
 	VkFormat _swapChainImageFormat;
 	VkExtent2D _swapChainExtent;
-
 	std::vector<VkImageView> _swapChainImageViews;
+
+	VkPipelineLayout _pipelineLayout;
+	VkRenderPass _renderPass;
+	VkPipeline _graphicsPipeline;
 
 	void createInstance();
 	void createSurface();
 	void selectPhysicalDevice(uint32_t deviceIndex = 0);
 	void createLogicalDevice();
+	void createRenderPass();
+	void createGraphicsPipeline();
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 	void printInstanceExtensionSupport();
