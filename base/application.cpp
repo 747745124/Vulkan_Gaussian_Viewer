@@ -1,5 +1,28 @@
 #include "application.h"
 
+void Application::cleanupSwapChain()
+{
+	for (auto framebuffer : _swapChainFramebuffers)
+	{
+		vkDestroyFramebuffer(_device, framebuffer, nullptr);
+	}
+	for (auto imageView : _swapChainImageViews)
+	{
+		vkDestroyImageView(_device, imageView, nullptr);
+	}
+
+	vkDestroySwapchainKHR(_device, _swapChain, nullptr);
+}
+
+void Application::recreateSwapChain()
+{
+	vkDeviceWaitIdle(_device);
+	cleanupSwapChain();
+	Utils::createSwapChain(_physicalDevice, _device, _surface, _window, _swapChain, _swapChainImages, _swapChainImageFormat, _swapChainExtent);
+	Utils::createImageViews(_device, _swapChainImages, _swapChainImageFormat, _swapChainImageViews);
+	createFramebuffers();
+};
+
 void Application::createSyncObjects()
 {
 	_imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
@@ -714,6 +737,7 @@ Application::Application()
 	createCommandPool();
 	createCommandBuffer();
 	createSyncObjects();
+	recreateSwapChain();
 
 	// GLFW callbacks registration
 	int width, height;
@@ -728,6 +752,9 @@ Application::Application()
 
 Application::~Application()
 {
+
+	cleanupSwapChain();
+
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 	{
 		if (_inFlightFences[i] != nullptr)
@@ -751,11 +778,6 @@ Application::~Application()
 		vkDestroyCommandPool(_device, _commandPool, nullptr);
 	}
 
-	for (auto framebuffer : _swapChainFramebuffers)
-	{
-		vkDestroyFramebuffer(_device, framebuffer, nullptr);
-	}
-
 	if (_graphicsPipeline != nullptr)
 	{
 		vkDestroyPipeline(_device, _graphicsPipeline, nullptr);
@@ -769,16 +791,6 @@ Application::~Application()
 	if (_renderPass != nullptr)
 	{
 		vkDestroyRenderPass(_device, _renderPass, nullptr);
-	}
-
-	for (auto imageView : _swapChainImageViews)
-	{
-		vkDestroyImageView(_device, imageView, nullptr);
-	}
-
-	if (_swapChain != nullptr)
-	{
-		vkDestroySwapchainKHR(_device, _swapChain, nullptr);
 	}
 
 	if (_device != nullptr)
