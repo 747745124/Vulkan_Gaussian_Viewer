@@ -69,8 +69,8 @@ private:
 	void createCommandBuffer();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void createSyncObjects();
-	void recreateSwapChain();
 	void cleanupSwapChain();
+	void recreateSwapChain();
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 	void printInstanceExtensionSupport();

@@ -16,12 +16,20 @@ void Application::cleanupSwapChain()
 
 void Application::recreateSwapChain()
 {
+	int width = 0, height = 0;
+	glfwGetFramebufferSize(_window, &width, &height);
+	while (width == 0 || height == 0)
+	{
+		glfwGetFramebufferSize(_window, &width, &height);
+		glfwWaitEvents();
+	}
+
 	vkDeviceWaitIdle(_device);
 	cleanupSwapChain();
 	Utils::createSwapChain(_physicalDevice, _device, _surface, _window, _swapChain, _swapChainImages, _swapChainImageFormat, _swapChainExtent);
 	Utils::createImageViews(_device, _swapChainImages, _swapChainImageFormat, _swapChainImageViews);
 	createFramebuffers();
-};
+}
 
 void Application::createSyncObjects()
 {
@@ -57,7 +65,12 @@ void Application::renderFrame()
 	uint32_t imageIndex;
 	VkResult result = vkAcquireNextImageKHR(_device, _swapChain, UINT64_MAX, _imageAvailableSemaphores[_currentFrame], VK_NULL_HANDLE, &imageIndex);
 
-	if (result != VK_SUCCESS)
+	if (result == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		recreateSwapChain();
+		return;
+	}
+	else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
 	{
 		throw std::runtime_error("failed to acquire swap chain image!");
 	}
@@ -98,7 +111,17 @@ void Application::renderFrame()
 	presentInfo.pImageIndices = &imageIndex;
 	presentInfo.pResults = nullptr;
 
-	vkQueuePresentKHR(_presentQueue, &presentInfo);
+	result = vkQueuePresentKHR(_presentQueue, &presentInfo);
+
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || _windowReized)
+	{
+		_windowReized = false;
+		recreateSwapChain();
+	}
+	else if (result != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to present swap chain image!");
+	}
 
 	// Advance to the next frame
 	_currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -737,7 +760,6 @@ Application::Application()
 	createCommandPool();
 	createCommandBuffer();
 	createSyncObjects();
-	recreateSwapChain();
 
 	// GLFW callbacks registration
 	int width, height;
