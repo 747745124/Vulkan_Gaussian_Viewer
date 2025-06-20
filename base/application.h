@@ -48,6 +48,15 @@ private:
 	VkPipelineLayout _pipelineLayout;
 	VkRenderPass _renderPass;
 	VkPipeline _graphicsPipeline;
+	VkCommandPool _commandPool;
+	std::vector<VkFramebuffer> _swapChainFramebuffers;
+
+	const uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+	uint32_t _currentFrame = 0;
+	std::vector<VkCommandBuffer> _commandBuffers;
+	std::vector<VkSemaphore> _imageAvailableSemaphores;
+	std::vector<VkSemaphore> _renderFinishedSemaphores;
+	std::vector<VkFence> _inFlightFences;
 
 	void createInstance();
 	void createSurface();
@@ -55,6 +64,11 @@ private:
 	void createLogicalDevice();
 	void createRenderPass();
 	void createGraphicsPipeline();
+	void createFramebuffers();
+	void createCommandPool();
+	void createCommandBuffer();
+	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+	void createSyncObjects();
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 	void printInstanceExtensionSupport();
@@ -90,10 +104,10 @@ protected:
 	void updateTime();
 
 	/* derived class can override this function to handle input */
-	virtual void handleInput() = 0;
+	virtual void handleInput() {};
 
 	/* derived class can override this function to render a frame */
-	virtual void renderFrame() = 0;
+	virtual void renderFrame();
 
 	void showFpsInWindowTitle();
 

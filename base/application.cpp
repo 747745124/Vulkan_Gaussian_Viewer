@@ -1,5 +1,203 @@
 #include "application.h"
 
+void Application::createSyncObjects()
+{
+	_imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+	_renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+	_inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
+	VkSemaphoreCreateInfo semaphoreInfo = {};
+	semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	VkFenceCreateInfo fenceInfo = {};
+	fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	// used to handle for the first frame
+	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+	{
+		if (vkCreateSemaphore(_device, &semaphoreInfo, nullptr, &_imageAvailableSemaphores[i]) != VK_SUCCESS ||
+			vkCreateSemaphore(_device, &semaphoreInfo, nullptr, &_renderFinishedSemaphores[i]) != VK_SUCCESS ||
+			vkCreateFence(_device, &fenceInfo, nullptr, &_inFlightFences[i]) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create sync objects!");
+		}
+	}
+}
+
+void Application::renderFrame()
+{
+	// wait for previous frame to finish
+	vkWaitForFences(_device, 1, &_inFlightFences[_currentFrame], VK_TRUE, UINT64_MAX);
+	vkResetFences(_device, 1, &_inFlightFences[_currentFrame]);
+
+	// acquire an image from the swap chain
+	uint32_t imageIndex;
+	VkResult result = vkAcquireNextImageKHR(_device, _swapChain, UINT64_MAX, _imageAvailableSemaphores[_currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+	if (result != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to acquire swap chain image!");
+	}
+
+	// record the command buffer
+	vkResetCommandBuffer(_commandBuffers[_currentFrame], 0);
+	recordCommandBuffer(_commandBuffers[_currentFrame], imageIndex);
+
+	// submit the command buffer
+	VkSubmitInfo submitInfo = {};
+	VkSemaphore waitSemaphores[] = {_imageAvailableSemaphores[_currentFrame]};
+	VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = waitSemaphores;
+	submitInfo.pWaitDstStageMask = waitStages;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &_commandBuffers[_currentFrame];
+
+	VkSemaphore signalSemaphores[] = {_renderFinishedSemaphores[_currentFrame]};
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = signalSemaphores;
+
+	if (vkQueueSubmit(_graphicsQueue, 1, &submitInfo, _inFlightFences[_currentFrame]) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to submit draw command buffer!");
+	}
+
+	// present the image
+	VkPresentInfoKHR presentInfo = {};
+	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = signalSemaphores;
+
+	VkSwapchainKHR swapChains[] = {_swapChain};
+	presentInfo.swapchainCount = 1;
+	presentInfo.pSwapchains = swapChains;
+	presentInfo.pImageIndices = &imageIndex;
+	presentInfo.pResults = nullptr;
+
+	vkQueuePresentKHR(_presentQueue, &presentInfo);
+
+	// Advance to the next frame
+	_currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void Application::createCommandPool()
+{
+	QueueFamilyIndices indices = Utils::findQueueFamilyIndex(_physicalDevice, _surface);
+
+	VkCommandPoolCreateInfo poolInfo = {};
+	poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	poolInfo.queueFamilyIndex = indices.graphicsFamily.value();
+	poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	if (vkCreateCommandPool(_device, &poolInfo, nullptr, &_commandPool) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create command pool!");
+	}
+
+	return;
+}
+
+void Application::createCommandBuffer()
+{
+	_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+	VkCommandBufferAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.commandPool = _commandPool;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandBufferCount = static_cast<uint32_t>(_commandBuffers.size());
+
+	if (vkAllocateCommandBuffers(_device, &allocInfo, _commandBuffers.data()) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate command buffer!");
+	}
+
+	return;
+}
+
+void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+{
+	VkCommandBufferBeginInfo beginInfo = {};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	// usage
+	beginInfo.flags = 0;
+	// used for secondary command buffers
+	beginInfo.pInheritanceInfo = nullptr;
+
+	if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to begin recording command buffer!");
+	}
+
+	// render pass starts
+	VkRenderPassBeginInfo renderPassBeginInfo = {};
+	renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	renderPassBeginInfo.renderPass = _renderPass;
+	renderPassBeginInfo.framebuffer = _swapChainFramebuffers[imageIndex];
+	renderPassBeginInfo.renderArea.offset = {0, 0};
+	renderPassBeginInfo.renderArea.extent = _swapChainExtent;
+
+	VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
+	renderPassBeginInfo.clearValueCount = 1;
+	renderPassBeginInfo.pClearValues = &clearColor;
+
+	vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+	// bind to the pipeline, this is a graphics pipeline, not a compute pipeline
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _graphicsPipeline);
+
+	VkViewport viewport = {};
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = static_cast<float>(_swapChainExtent.width);
+	viewport.height = static_cast<float>(_swapChainExtent.height);
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+	VkRect2D scissor = {};
+	scissor.offset = {0, 0};
+	scissor.extent = _swapChainExtent;
+	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+	// issue the draw command
+	// vertex count, instance count, first vertex, first instance
+	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+	// End the render pass
+	vkCmdEndRenderPass(commandBuffer);
+
+	if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to record command buffer!");
+	}
+}
+
+void Application::createFramebuffers()
+{
+	_swapChainFramebuffers.resize(_swapChainImageViews.size());
+
+	for (size_t i = 0; i < _swapChainImageViews.size(); i++)
+	{
+		VkImageView attachments[] = {_swapChainImageViews[i]};
+
+		VkFramebufferCreateInfo framebufferInfo = {};
+		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferInfo.renderPass = _renderPass;
+		framebufferInfo.attachmentCount = 1;
+		framebufferInfo.pAttachments = attachments;
+		framebufferInfo.width = _swapChainExtent.width;
+		framebufferInfo.height = _swapChainExtent.height;
+		framebufferInfo.layers = 1;
+
+		if (vkCreateFramebuffer(_device, &framebufferInfo, nullptr, &_swapChainFramebuffers[i]) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create framebuffer!");
+		}
+	}
+};
+
 void Application::createRenderPass()
 {
 	VkAttachmentDescription colorAttachment = {};
@@ -512,6 +710,10 @@ Application::Application()
 
 	createRenderPass();
 	createGraphicsPipeline();
+	createFramebuffers();
+	createCommandPool();
+	createCommandBuffer();
+	createSyncObjects();
 
 	// GLFW callbacks registration
 	int width, height;
@@ -526,6 +728,34 @@ Application::Application()
 
 Application::~Application()
 {
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+	{
+		if (_inFlightFences[i] != nullptr)
+		{
+			vkDestroyFence(_device, _inFlightFences[i], nullptr);
+		}
+
+		if (_renderFinishedSemaphores[i] != nullptr)
+		{
+			vkDestroySemaphore(_device, _renderFinishedSemaphores[i], nullptr);
+		}
+
+		if (_imageAvailableSemaphores[i] != nullptr)
+		{
+			vkDestroySemaphore(_device, _imageAvailableSemaphores[i], nullptr);
+		}
+	}
+
+	if (_commandPool != nullptr)
+	{
+		vkDestroyCommandPool(_device, _commandPool, nullptr);
+	}
+
+	for (auto framebuffer : _swapChainFramebuffers)
+	{
+		vkDestroyFramebuffer(_device, framebuffer, nullptr);
+	}
+
 	if (_graphicsPipeline != nullptr)
 	{
 		vkDestroyPipeline(_device, _graphicsPipeline, nullptr);
@@ -583,9 +813,11 @@ void Application::run()
 		handleInput();
 		renderFrame();
 
-		glfwSwapBuffers(_window);
+		// glfwSwapBuffers(_window);
 		glfwPollEvents();
 	}
+
+	vkDeviceWaitIdle(_device);
 }
 
 void Application::updateTime()
