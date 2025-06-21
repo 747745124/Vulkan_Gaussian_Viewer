@@ -12,6 +12,7 @@
 #include "utility.hpp"
 #include "swapChainUtils.hpp"
 #include "shaderUtils.hpp"
+#include "vertex.h"
 
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -58,6 +59,9 @@ private:
 	std::vector<VkSemaphore> _renderFinishedSemaphores;
 	std::vector<VkFence> _inFlightFences;
 
+	VkBuffer _triangleVertexBuffer;
+	VkDeviceMemory _triangleVertexBufferMemory;
+
 	void createInstance();
 	void createSurface();
 	void selectPhysicalDevice(uint32_t deviceIndex = 0);
@@ -66,6 +70,7 @@ private:
 	void createGraphicsPipeline();
 	void createFramebuffers();
 	void createCommandPool();
+	void createVertexBuffer();
 	void createCommandBuffer();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void createSyncObjects();

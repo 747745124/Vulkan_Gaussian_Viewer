@@ -1,5 +1,47 @@
 #include "application.h"
 
+// create a triangle vertex buffer
+void Application::createVertexBuffer()
+{
+	VkBufferCreateInfo bufferInfo = {};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = sizeof(triangleVertices[0]) * triangleVertices.size();
+	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	if (vkCreateBuffer(_device, &bufferInfo, nullptr, &_triangleVertexBuffer) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create vertex buffer!");
+	}
+
+	// allocate memory for the buffer
+	VkMemoryRequirements memRequirements;
+	vkGetBufferMemoryRequirements(_device, _triangleVertexBuffer, &memRequirements);
+
+	VkMemoryAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = Utils::findMemoryType(_physicalDevice, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+	if (vkAllocateMemory(_device, &allocInfo, nullptr, &_triangleVertexBufferMemory) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate vertex buffer memory!");
+	}
+
+	// bind the buffer to the memory
+	vkBindBufferMemory(_device, _triangleVertexBuffer, _triangleVertexBufferMemory, 0);
+
+	// copy the triangle vertices to the buffer
+	// data is the temporary pointer to the GPU memory
+	// usually the GPU memory is not accessible by the CPU
+	// so we need to map the memory to the CPU
+	void *data;
+	VkDeviceSize bufferSize = sizeof(triangleVertices[0]) * triangleVertices.size();
+	vkMapMemory(_device, _triangleVertexBufferMemory, 0, bufferSize, 0, &data);
+	memcpy(data, triangleVertices.data(), bufferSize);
+	vkUnmapMemory(_device, _triangleVertexBufferMemory);
+}
+
 void Application::cleanupSwapChain()
 {
 	for (auto framebuffer : _swapChainFramebuffers)
@@ -184,7 +226,7 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 	renderPassBeginInfo.renderArea.offset = {0, 0};
 	renderPassBeginInfo.renderArea.extent = _swapChainExtent;
 
-	VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
+	VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f}; // Back to black
 	renderPassBeginInfo.clearValueCount = 1;
 	renderPassBeginInfo.pClearValues = &clearColor;
 
@@ -207,9 +249,13 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 	scissor.extent = _swapChainExtent;
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+	// bind the vertex buffer
+	VkBuffer vertexBuffers[] = {_triangleVertexBuffer};
+	VkDeviceSize offsets[] = {0};
+	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 	// issue the draw command
 	// vertex count, instance count, first vertex, first instance
-	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+	vkCmdDraw(commandBuffer, static_cast<uint32_t>(triangleVertices.size()), 1, 0, 0);
 
 	// End the render pass
 	vkCmdEndRenderPass(commandBuffer);
@@ -316,13 +362,16 @@ void Application::createGraphicsPipeline()
 	dynamicStateInfo.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
 	dynamicStateInfo.pDynamicStates = dynamicStates.data();
 
+	auto vertexInputBindingDescription = Vertex::getBindingDescription();
+	auto vertexInputAttributeDescriptions = Vertex::getAttributeDescriptions();
+
 	// vertex input
 	VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
 	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-	vertexInputInfo.vertexBindingDescriptionCount = 0;
-	vertexInputInfo.pVertexBindingDescriptions = nullptr;
-	vertexInputInfo.vertexAttributeDescriptionCount = 0;
-	vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+	vertexInputInfo.vertexBindingDescriptionCount = 1;
+	vertexInputInfo.pVertexBindingDescriptions = &vertexInputBindingDescription;
+	vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributeDescriptions.size());
+	vertexInputInfo.pVertexAttributeDescriptions = vertexInputAttributeDescriptions.data();
 
 	// input assembly
 	VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
@@ -758,6 +807,7 @@ Application::Application()
 	createGraphicsPipeline();
 	createFramebuffers();
 	createCommandPool();
+	createVertexBuffer();
 	createCommandBuffer();
 	createSyncObjects();
 
@@ -776,6 +826,16 @@ Application::~Application()
 {
 
 	cleanupSwapChain();
+
+	if (_triangleVertexBuffer != nullptr)
+	{
+		vkDestroyBuffer(_device, _triangleVertexBuffer, nullptr);
+	}
+
+	if (_triangleVertexBufferMemory != nullptr)
+	{
+		vkFreeMemory(_device, _triangleVertexBufferMemory, nullptr);
+	}
 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 	{
