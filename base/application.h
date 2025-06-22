@@ -61,8 +61,11 @@ private:
 	std::vector<VkSemaphore> _renderFinishedSemaphores;
 	std::vector<VkFence> _inFlightFences;
 
-	VkBuffer _triangleVertexBuffer;
-	VkDeviceMemory _triangleVertexBufferMemory;
+	VkBuffer _vertexBuffer;
+	VkDeviceMemory _vertexBufferMemory;
+
+	VkBuffer _indexBuffer;
+	VkDeviceMemory _indexBufferMemory;
 
 	void createInstance();
 	void createSurface();
@@ -80,6 +83,7 @@ private:
 	void cleanupSwapChain();
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	void recreateSwapChain();
+	void createIndexBuffer();
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 	void printInstanceExtensionSupport();
