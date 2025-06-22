@@ -1,45 +1,71 @@
 #include "application.h"
 
-// create a triangle vertex buffer
-void Application::createVertexBuffer()
+// this is a temporary one-time command buffer
+void Application::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+{
+	VkCommandBuffer commandBuffer = Utils::beginSingleTimeCommands(_device, _commandPool);
+
+	VkBufferCopy copyRegion = {};
+	copyRegion.srcOffset = 0;
+	copyRegion.dstOffset = 0;
+	copyRegion.size = size;
+	vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+	Utils::endSingleTimeCommands(_device, _commandPool, _graphicsQueue, commandBuffer);
+}
+
+void Application::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &bufferMemory)
 {
 	VkBufferCreateInfo bufferInfo = {};
 	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufferInfo.size = sizeof(triangleVertices[0]) * triangleVertices.size();
-	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	bufferInfo.size = size;
+	bufferInfo.usage = usage;
 	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-	if (vkCreateBuffer(_device, &bufferInfo, nullptr, &_triangleVertexBuffer) != VK_SUCCESS)
+	if (vkCreateBuffer(_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
 	{
-		throw std::runtime_error("failed to create vertex buffer!");
+		throw std::runtime_error("failed to create buffer!");
 	}
 
-	// allocate memory for the buffer
 	VkMemoryRequirements memRequirements;
-	vkGetBufferMemoryRequirements(_device, _triangleVertexBuffer, &memRequirements);
+	vkGetBufferMemoryRequirements(_device, buffer, &memRequirements);
 
 	VkMemoryAllocateInfo allocInfo = {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocInfo.allocationSize = memRequirements.size;
-	allocInfo.memoryTypeIndex = Utils::findMemoryType(_physicalDevice, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	allocInfo.memoryTypeIndex = Utils::findMemoryType(_physicalDevice, memRequirements.memoryTypeBits, properties);
 
-	if (vkAllocateMemory(_device, &allocInfo, nullptr, &_triangleVertexBufferMemory) != VK_SUCCESS)
+	if (vkAllocateMemory(_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS)
 	{
-		throw std::runtime_error("failed to allocate vertex buffer memory!");
+		throw std::runtime_error("failed to allocate buffer memory!");
 	}
 
-	// bind the buffer to the memory
-	vkBindBufferMemory(_device, _triangleVertexBuffer, _triangleVertexBufferMemory, 0);
+	vkBindBufferMemory(_device, buffer, bufferMemory, 0);
+}
+
+// create a triangle vertex buffer
+void Application::createVertexBuffer()
+{
+	VkDeviceSize bufferSize = sizeof(triangleVertices[0]) * triangleVertices.size();
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+	// using staging buffer to copy the triangle vertices to the buffer
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
 	// copy the triangle vertices to the buffer
 	// data is the temporary pointer to the GPU memory
 	// usually the GPU memory is not accessible by the CPU
 	// so we need to map the memory to the CPU
 	void *data;
-	VkDeviceSize bufferSize = sizeof(triangleVertices[0]) * triangleVertices.size();
-	vkMapMemory(_device, _triangleVertexBufferMemory, 0, bufferSize, 0, &data);
+	vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
 	memcpy(data, triangleVertices.data(), bufferSize);
-	vkUnmapMemory(_device, _triangleVertexBufferMemory);
+	vkUnmapMemory(_device, stagingBufferMemory);
+
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _triangleVertexBuffer, _triangleVertexBufferMemory);
+	copyBuffer(stagingBuffer, _triangleVertexBuffer, bufferSize);
+
+	vkDestroyBuffer(_device, stagingBuffer, nullptr);
+	vkFreeMemory(_device, stagingBufferMemory, nullptr);
 }
 
 void Application::cleanupSwapChain()

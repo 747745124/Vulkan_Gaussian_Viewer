@@ -5,6 +5,8 @@
 #include <iostream>
 #include <vector>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <set>
@@ -74,7 +76,9 @@ private:
 	void createCommandBuffer();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void createSyncObjects();
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &bufferMemory);
 	void cleanupSwapChain();
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	void recreateSwapChain();
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
