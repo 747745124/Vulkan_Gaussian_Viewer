@@ -32,6 +32,10 @@
 
 #include <GLFW/glfw3native.h>
 
+#define GLM_FORCE_RADIANS
+#include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
+
 class Application
 {
 private:
@@ -61,11 +65,21 @@ private:
 	std::vector<VkSemaphore> _renderFinishedSemaphores;
 	std::vector<VkFence> _inFlightFences;
 
+	// GPU memory handles
+	std::vector<VkBuffer> _uniformBuffers;
+	// actual GPU memory allocated for the uniform buffers
+	std::vector<VkDeviceMemory> _uniformBuffersMemory;
+	// CPU pointer to the GPU memory
+	std::vector<void *> _uniformBuffersMapped;
+
 	VkBuffer _vertexBuffer;
 	VkDeviceMemory _vertexBufferMemory;
 
 	VkBuffer _indexBuffer;
 	VkDeviceMemory _indexBufferMemory;
+
+	VkDescriptorSetLayout _descriptorSetLayout;
+	VkDescriptorPool _descriptorPool;
 
 	void createInstance();
 	void createSurface();
@@ -75,8 +89,7 @@ private:
 	void createGraphicsPipeline();
 	void createFramebuffers();
 	void createCommandPool();
-	void createVertexBuffer();
-	void createCommandBuffer();
+
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void createSyncObjects();
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &bufferMemory);
@@ -84,6 +97,13 @@ private:
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	void recreateSwapChain();
 	void createIndexBuffer();
+	void createVertexBuffer();
+	// note that uniform buffers usually vary for each frame
+	void createUniformBuffers();
+	void createCommandBuffer();
+	// descriptor set layout
+	void createDescriptorSetLayout();
+	void updateUniformBuffer(uint32_t currentFrame);
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 	void printInstanceExtensionSupport();

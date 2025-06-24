@@ -1,5 +1,59 @@
 #include "application.h"
 
+void Application::updateUniformBuffer(uint32_t currentFrame)
+{
+	// only called once
+	static auto startTime = std::chrono::high_resolution_clock::now();
+	// called every frame
+	auto currentTime = std::chrono::high_resolution_clock::now();
+	float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+	UniformBufferObject ubo = {};
+	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.proj = glm::perspective(glm::radians(45.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 10.0f);
+	ubo.proj[1][1] *= -1;
+
+	memcpy(_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
+};
+
+void Application::createUniformBuffers()
+{
+	VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+	_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+	_uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+	_uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+	{
+		createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, _uniformBuffers[i], _uniformBuffersMemory[i]);
+		vkMapMemory(_device, _uniformBuffersMemory[i], 0, bufferSize, 0, &_uniformBuffersMapped[i]);
+	}
+}
+
+void Application::createDescriptorSetLayout()
+{
+	VkDescriptorSetLayoutBinding uboLayoutBinding = {};
+	uboLayoutBinding.binding = 0;
+	uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	uboLayoutBinding.descriptorCount = 1;
+	// only one UBO (i.e. MVP matrix)
+	uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	uboLayoutBinding.pImmutableSamplers = nullptr;
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 1;
+	layoutInfo.pBindings = &uboLayoutBinding;
+
+	if (vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &_descriptorSetLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
+
+	return;
+}
+
 void Application::createIndexBuffer()
 {
 	VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
@@ -161,6 +215,8 @@ void Application::renderFrame()
 		throw std::runtime_error("failed to acquire swap chain image!");
 	}
 
+	// update the uniform buffer
+	updateUniformBuffer(_currentFrame);
 	// record the command buffer
 	vkResetCommandBuffer(_commandBuffers[_currentFrame], 0);
 	recordCommandBuffer(_commandBuffers[_currentFrame], imageIndex);
@@ -502,8 +558,8 @@ void Application::createGraphicsPipeline()
 	// pipeline layout, we'll specify the uniforms later
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
 	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipelineLayoutInfo.setLayoutCount = 0;
-	pipelineLayoutInfo.pSetLayouts = nullptr;
+	pipelineLayoutInfo.setLayoutCount = 1;
+	pipelineLayoutInfo.pSetLayouts = &_descriptorSetLayout;
 	pipelineLayoutInfo.pushConstantRangeCount = 0;
 	pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
@@ -853,11 +909,13 @@ Application::Application()
 	Utils::createImageViews(_device, _swapChainImages, _swapChainImageFormat, _swapChainImageViews);
 
 	createRenderPass();
+	createDescriptorSetLayout();
 	createGraphicsPipeline();
 	createFramebuffers();
 	createCommandPool();
 	createVertexBuffer();
 	createIndexBuffer();
+	createUniformBuffers();
 	createCommandBuffer();
 	createSyncObjects();
 
@@ -913,11 +971,26 @@ Application::~Application()
 		{
 			vkDestroySemaphore(_device, _imageAvailableSemaphores[i], nullptr);
 		}
+
+		if (_uniformBuffers[i] != nullptr)
+		{
+			vkDestroyBuffer(_device, _uniformBuffers[i], nullptr);
+		}
+
+		if (_uniformBuffersMemory[i] != nullptr)
+		{
+			vkFreeMemory(_device, _uniformBuffersMemory[i], nullptr);
+		}
 	}
 
 	if (_commandPool != nullptr)
 	{
 		vkDestroyCommandPool(_device, _commandPool, nullptr);
+	}
+
+	if (_descriptorSetLayout != nullptr)
+	{
+		vkDestroyDescriptorSetLayout(_device, _descriptorSetLayout, nullptr);
 	}
 
 	if (_graphicsPipeline != nullptr)
