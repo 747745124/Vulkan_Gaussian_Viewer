@@ -1,5 +1,65 @@
 #include "application.h"
 
+void Application::createDescriptorSets()
+{
+	std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, _descriptorSetLayout);
+	VkDescriptorSetAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = _descriptorPool;
+	allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+	allocInfo.pSetLayouts = layouts.data();
+
+	_descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+	if (vkAllocateDescriptorSets(_device, &allocInfo, _descriptorSets.data()) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate descriptor sets!");
+	}
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+	{
+		VkDescriptorBufferInfo bufferInfo = {};
+		bufferInfo.buffer = _uniformBuffers[i];
+		bufferInfo.offset = 0;
+		bufferInfo.range = sizeof(UniformBufferObject);
+
+		VkWriteDescriptorSet descriptorWrite = {};
+		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrite.dstSet = _descriptorSets[i];
+		descriptorWrite.dstBinding = 0;
+		descriptorWrite.dstArrayElement = 0;
+		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descriptorWrite.descriptorCount = 1;
+		descriptorWrite.pBufferInfo = &bufferInfo;
+		descriptorWrite.pImageInfo = nullptr;
+		descriptorWrite.pTexelBufferView = nullptr;
+
+		vkUpdateDescriptorSets(_device, 1, &descriptorWrite, 0, nullptr);
+	}
+
+	return;
+};
+
+void Application::createDescriptorPool()
+{
+	VkDescriptorPoolSize poolSize = {};
+	poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+	VkDescriptorPoolCreateInfo poolInfo = {};
+	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	poolInfo.poolSizeCount = 1;
+	poolInfo.pPoolSizes = &poolSize;
+
+	poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+	if (vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_descriptorPool) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create descriptor pool!");
+	}
+
+	return;
+};
+
 void Application::updateUniformBuffer(uint32_t currentFrame)
 {
 	// only called once
@@ -349,6 +409,8 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 	scissor.extent = _swapChainExtent;
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+	// bind the descriptor set
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[_currentFrame], 0, nullptr);
 	// bind the vertex buffer
 	VkBuffer vertexBuffers[] = {_vertexBuffer};
 	VkDeviceSize offsets[] = {0};
@@ -513,7 +575,7 @@ void Application::createGraphicsPipeline()
 	rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
 	rasterizer.lineWidth = 1.0f;
 	rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-	rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
 	rasterizer.depthBiasEnable = VK_FALSE;
 	rasterizer.depthBiasConstantFactor = 0.0f;
@@ -916,6 +978,8 @@ Application::Application()
 	createVertexBuffer();
 	createIndexBuffer();
 	createUniformBuffers();
+	createDescriptorPool();
+	createDescriptorSets();
 	createCommandBuffer();
 	createSyncObjects();
 
@@ -986,6 +1050,11 @@ Application::~Application()
 	if (_commandPool != nullptr)
 	{
 		vkDestroyCommandPool(_device, _commandPool, nullptr);
+	}
+
+	if (_descriptorPool != nullptr)
+	{
+		vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
 	}
 
 	if (_descriptorSetLayout != nullptr)

@@ -79,6 +79,7 @@ private:
 	VkDeviceMemory _indexBufferMemory;
 
 	VkDescriptorSetLayout _descriptorSetLayout;
+	std::vector<VkDescriptorSet> _descriptorSets;
 	VkDescriptorPool _descriptorPool;
 
 	void createInstance();
@@ -89,6 +90,7 @@ private:
 	void createGraphicsPipeline();
 	void createFramebuffers();
 	void createCommandPool();
+	void createDescriptorPool();
 
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void createSyncObjects();
@@ -103,6 +105,7 @@ private:
 	void createCommandBuffer();
 	// descriptor set layout
 	void createDescriptorSetLayout();
+	void createDescriptorSets();
 	void updateUniformBuffer(uint32_t currentFrame);
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
