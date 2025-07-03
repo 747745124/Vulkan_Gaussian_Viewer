@@ -24,7 +24,7 @@ struct QueueFamilyIndices
 namespace Utils
 {
 
-    VkImageView createImageView(const VkDevice &device, const VkImage &image, VkFormat format)
+    inline VkImageView createImageView(const VkDevice &device, const VkImage &image, VkFormat format)
     {
         VkImageViewCreateInfo viewInfo = {};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
