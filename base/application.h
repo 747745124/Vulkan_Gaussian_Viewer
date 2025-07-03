@@ -33,6 +33,7 @@
 #include <GLFW/glfw3native.h>
 
 #define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 
@@ -82,6 +83,12 @@ private:
 	std::vector<VkDescriptorSet> _descriptorSets;
 	VkDescriptorPool _descriptorPool;
 
+	// texture related resources
+	VkImage _textureImage;
+	VkDeviceMemory _textureImageMemory;
+	VkImageView _textureImageView;
+	VkSampler _textureSampler;
+
 	void createInstance();
 	void createSurface();
 	void selectPhysicalDevice(uint32_t deviceIndex = 0);
@@ -91,6 +98,12 @@ private:
 	void createFramebuffers();
 	void createCommandPool();
 	void createDescriptorPool();
+
+	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &imageMemory);
+	void createTextureImage(const std::string &texturePath);
+	void createTextureImageView();
+	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void createSyncObjects();

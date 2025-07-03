@@ -32,6 +32,7 @@ add_executable(Triangle
 # Include directories
 target_include_directories(Triangle PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/external
     ${GLFW_INCLUDE_DIRS}
     ${GLFW_INCLUDE_DIR}/native
 )
