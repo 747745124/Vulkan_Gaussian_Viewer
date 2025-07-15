@@ -25,8 +25,7 @@ void Application::createTextureSampler()
 	samplerInfo.minLod = 0.0f;
 	samplerInfo.maxLod = 0.0f;
 
-	VkSampler sampler;
-	if (vkCreateSampler(_device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS)
+	if (vkCreateSampler(_device, &samplerInfo, nullptr, &_textureSampler) != VK_SUCCESS)
 	{
 		throw std::runtime_error("failed to create texture sampler!");
 	}
@@ -47,6 +46,8 @@ void Application::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t wid
 	region.bufferImageHeight = 0;
 	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	region.imageSubresource.mipLevel = 0;
+	region.imageSubresource.baseArrayLayer = 0;
+	region.imageSubresource.layerCount = 1;
 
 	region.imageOffset = {0, 0, 0};
 	region.imageExtent = {width, height, 1};
@@ -199,18 +200,31 @@ void Application::createDescriptorSets()
 		bufferInfo.offset = 0;
 		bufferInfo.range = sizeof(UniformBufferObject);
 
-		VkWriteDescriptorSet descriptorWrite = {};
-		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrite.dstSet = _descriptorSets[i];
-		descriptorWrite.dstBinding = 0;
-		descriptorWrite.dstArrayElement = 0;
-		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		descriptorWrite.descriptorCount = 1;
-		descriptorWrite.pBufferInfo = &bufferInfo;
-		descriptorWrite.pImageInfo = nullptr;
-		descriptorWrite.pTexelBufferView = nullptr;
+		VkDescriptorImageInfo imageInfo = {};
+		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imageInfo.imageView = _textureImageView;
+		imageInfo.sampler = _textureSampler;
 
-		vkUpdateDescriptorSets(_device, 1, &descriptorWrite, 0, nullptr);
+		std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
+		descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrites[0].dstSet = _descriptorSets[i];
+		descriptorWrites[0].dstBinding = 0;
+		descriptorWrites[0].dstArrayElement = 0;
+		descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descriptorWrites[0].descriptorCount = 1;
+		descriptorWrites[0].pBufferInfo = &bufferInfo;
+		descriptorWrites[0].pImageInfo = nullptr;
+		descriptorWrites[0].pTexelBufferView = nullptr;
+
+		descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrites[1].dstSet = _descriptorSets[i];
+		descriptorWrites[1].dstBinding = 1;
+		descriptorWrites[1].dstArrayElement = 0;
+		descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		descriptorWrites[1].descriptorCount = 1;
+		descriptorWrites[1].pImageInfo = &imageInfo;
+
+		vkUpdateDescriptorSets(_device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 	}
 
 	return;
@@ -218,14 +232,16 @@ void Application::createDescriptorSets()
 
 void Application::createDescriptorPool()
 {
-	VkDescriptorPoolSize poolSize = {};
-	poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+	std::array<VkDescriptorPoolSize, 2> poolSizes = {};
+	poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+	poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
 	VkDescriptorPoolCreateInfo poolInfo = {};
 	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	poolInfo.poolSizeCount = 1;
-	poolInfo.pPoolSizes = &poolSize;
+	poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+	poolInfo.pPoolSizes = poolSizes.data();
 
 	poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
@@ -278,10 +294,19 @@ void Application::createDescriptorSetLayout()
 	uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	uboLayoutBinding.pImmutableSamplers = nullptr;
 
+	VkDescriptorSetLayoutBinding samplerLayoutBinding = {};
+	samplerLayoutBinding.binding = 1;
+	samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	samplerLayoutBinding.descriptorCount = 1;
+	samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	samplerLayoutBinding.pImmutableSamplers = nullptr;
+
+	std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
+
 	VkDescriptorSetLayoutCreateInfo layoutInfo = {};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 1;
-	layoutInfo.pBindings = &uboLayoutBinding;
+	layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+	layoutInfo.pBindings = bindings.data();
 
 	if (vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &_descriptorSetLayout) != VK_SUCCESS)
 	{
@@ -1118,6 +1143,12 @@ void Application::printInstanceExtensionSupport()
 
 Application::Application()
 {
+	// Initialize texture resources to VK_NULL_HANDLE
+	_textureImage = VK_NULL_HANDLE;
+	_textureImageMemory = VK_NULL_HANDLE;
+	_textureImageView = VK_NULL_HANDLE;
+	_textureSampler = VK_NULL_HANDLE;
+
 	// GLFW Stuff Initialization
 	if (glfwInit() != GLFW_TRUE)
 	{
@@ -1156,6 +1187,12 @@ Application::Application()
 	createVertexBuffer();
 	createIndexBuffer();
 	createUniformBuffers();
+
+	// Create texture resources
+	createTextureImage("./resource/texture.jpg");
+	createTextureImageView();
+	createTextureSampler();
+
 	createDescriptorPool();
 	createDescriptorSets();
 	createCommandBuffer();
@@ -1177,105 +1214,105 @@ Application::~Application()
 
 	cleanupSwapChain();
 
-	if (_textureSampler != nullptr)
+	if (_textureSampler != VK_NULL_HANDLE)
 	{
 		vkDestroySampler(_device, _textureSampler, nullptr);
 	}
 
-	if (_textureImageView != nullptr)
+	if (_textureImageView != VK_NULL_HANDLE)
 	{
 		vkDestroyImageView(_device, _textureImageView, nullptr);
 	}
 
-	if (_textureImage != nullptr)
+	if (_textureImage != VK_NULL_HANDLE)
 	{
 		vkDestroyImage(_device, _textureImage, nullptr);
 	}
 
-	if (_textureImageMemory != nullptr)
+	if (_textureImageMemory != VK_NULL_HANDLE)
 	{
 		vkFreeMemory(_device, _textureImageMemory, nullptr);
 	}
 
-	if (_vertexBuffer != nullptr)
+	if (_vertexBuffer != VK_NULL_HANDLE)
 	{
 		vkDestroyBuffer(_device, _vertexBuffer, nullptr);
 	}
 
-	if (_vertexBufferMemory != nullptr)
+	if (_vertexBufferMemory != VK_NULL_HANDLE)
 	{
 		vkFreeMemory(_device, _vertexBufferMemory, nullptr);
 	}
 
-	if (_indexBuffer != nullptr)
+	if (_indexBuffer != VK_NULL_HANDLE)
 	{
 		vkDestroyBuffer(_device, _indexBuffer, nullptr);
 	}
 
-	if (_indexBufferMemory != nullptr)
+	if (_indexBufferMemory != VK_NULL_HANDLE)
 	{
 		vkFreeMemory(_device, _indexBufferMemory, nullptr);
 	}
 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 	{
-		if (_inFlightFences[i] != nullptr)
+		if (_inFlightFences[i] != VK_NULL_HANDLE)
 		{
 			vkDestroyFence(_device, _inFlightFences[i], nullptr);
 		}
 
-		if (_renderFinishedSemaphores[i] != nullptr)
+		if (_renderFinishedSemaphores[i] != VK_NULL_HANDLE)
 		{
 			vkDestroySemaphore(_device, _renderFinishedSemaphores[i], nullptr);
 		}
 
-		if (_imageAvailableSemaphores[i] != nullptr)
+		if (_imageAvailableSemaphores[i] != VK_NULL_HANDLE)
 		{
 			vkDestroySemaphore(_device, _imageAvailableSemaphores[i], nullptr);
 		}
 
-		if (_uniformBuffers[i] != nullptr)
+		if (_uniformBuffers[i] != VK_NULL_HANDLE)
 		{
 			vkDestroyBuffer(_device, _uniformBuffers[i], nullptr);
 		}
 
-		if (_uniformBuffersMemory[i] != nullptr)
+		if (_uniformBuffersMemory[i] != VK_NULL_HANDLE)
 		{
 			vkFreeMemory(_device, _uniformBuffersMemory[i], nullptr);
 		}
 	}
 
-	if (_commandPool != nullptr)
+	if (_commandPool != VK_NULL_HANDLE)
 	{
 		vkDestroyCommandPool(_device, _commandPool, nullptr);
 	}
 
-	if (_descriptorPool != nullptr)
+	if (_descriptorPool != VK_NULL_HANDLE)
 	{
 		vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
 	}
 
-	if (_descriptorSetLayout != nullptr)
+	if (_descriptorSetLayout != VK_NULL_HANDLE)
 	{
 		vkDestroyDescriptorSetLayout(_device, _descriptorSetLayout, nullptr);
 	}
 
-	if (_graphicsPipeline != nullptr)
+	if (_graphicsPipeline != VK_NULL_HANDLE)
 	{
 		vkDestroyPipeline(_device, _graphicsPipeline, nullptr);
 	}
 
-	if (_pipelineLayout != nullptr)
+	if (_pipelineLayout != VK_NULL_HANDLE)
 	{
 		vkDestroyPipelineLayout(_device, _pipelineLayout, nullptr);
 	}
 
-	if (_renderPass != nullptr)
+	if (_renderPass != VK_NULL_HANDLE)
 	{
 		vkDestroyRenderPass(_device, _renderPass, nullptr);
 	}
 
-	if (_device != nullptr)
+	if (_device != VK_NULL_HANDLE)
 	{
 		vkDestroyDevice(_device, nullptr);
 	}
@@ -1286,12 +1323,12 @@ Application::~Application()
 		_window = nullptr;
 	}
 
-	if (_surface != nullptr)
+	if (_surface != VK_NULL_HANDLE)
 	{
 		vkDestroySurfaceKHR(_instance, _surface, nullptr);
 	}
 
-	if (_instance != nullptr)
+	if (_instance != VK_NULL_HANDLE)
 	{
 		vkDestroyInstance(_instance, nullptr);
 	}
