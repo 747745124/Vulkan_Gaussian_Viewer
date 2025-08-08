@@ -47,6 +47,10 @@ private:
 	VkQueue _presentQueue;
 	VkSurfaceKHR _surface;
 
+	VkImage _depthImage;
+	VkDeviceMemory _depthImageMemory;
+	VkImageView _depthImageView;
+
 	VkSwapchainKHR _swapChain;
 	std::vector<VkImage> _swapChainImages;
 	VkFormat _swapChainImageFormat;
@@ -89,6 +93,15 @@ private:
 	VkImageView _textureImageView;
 	VkSampler _textureSampler;
 
+	void findDepthFormat()
+	{
+		Utils::findSupportedFormat(
+			_physicalDevice,
+			{VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+	}
+
 	void createInstance();
 	void createSurface();
 	void selectPhysicalDevice(uint32_t deviceIndex = 0);
@@ -98,6 +111,7 @@ private:
 	void createFramebuffers();
 	void createCommandPool();
 	void createDescriptorPool();
+	void createDepthResources();
 
 	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &imageMemory);
 	void createTextureImage(const std::string &texturePath);
