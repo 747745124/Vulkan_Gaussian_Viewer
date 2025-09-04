@@ -4,6 +4,7 @@
 #include <string>
 #include <iostream>
 #include <vector>
+#include <filesystem>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
@@ -77,6 +78,8 @@ private:
 	// CPU pointer to the GPU memory
 	std::vector<void *> _uniformBuffersMapped;
 
+	std::vector<Vertex> _vertices;
+	std::vector<uint32_t> _indices;
 	VkBuffer _vertexBuffer;
 	VkDeviceMemory _vertexBufferMemory;
 
@@ -93,6 +96,11 @@ private:
 	VkImageView _textureImageView;
 	VkSampler _textureSampler;
 
+	// shader storage buffer object
+	std::vector<VkBuffer> _shaderStorageBuffers;
+	std::vector<VkDeviceMemory> _shaderStorageBuffersMemory;
+	std::vector<void *> _shaderStorageBuffersMapped;
+
 	void findDepthFormat()
 	{
 		Utils::findSupportedFormat(
@@ -102,6 +110,7 @@ private:
 			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
 	}
 
+	void createShaderStorageBuffers();
 	void createInstance();
 	void createSurface();
 	void selectPhysicalDevice(uint32_t deviceIndex = 0);
@@ -141,6 +150,9 @@ private:
 	bool checkDeviceExtensionSupport(const VkPhysicalDevice &device, const std::vector<const char *> &requiredExtensions);
 	bool isDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surface);
 
+	// model loading
+	void loadModel();
+
 public:
 	Application();
 
@@ -155,6 +167,10 @@ protected:
 	int _windowWidth = 2000;
 	int _windowHeight = 1200;
 	bool _windowReized = false;
+
+	// model loading
+	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/teapot.obj";
+	const std::string _texturePath = "/Users/naoyuki/vk_tutorial/resource/texture.jpg";
 
 	/* timer for fps */
 	std::chrono::time_point<std::chrono::high_resolution_clock> _lastTimeStamp;
