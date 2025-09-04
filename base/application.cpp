@@ -1425,6 +1425,15 @@ Application::~Application()
 		{
 			vkFreeMemory(_device, _uniformBuffersMemory[i], nullptr);
 		}
+
+		if (_shaderStorageBuffers[i] != VK_NULL_HANDLE)
+		{
+			vkDestroyBuffer(_device, _shaderStorageBuffers[i], nullptr);
+		}
+		if (_shaderStorageBuffersMemory[i] != VK_NULL_HANDLE)
+		{
+			vkFreeMemory(_device, _shaderStorageBuffersMemory[i], nullptr);
+		}
 	}
 
 	if (_commandPool != VK_NULL_HANDLE)
