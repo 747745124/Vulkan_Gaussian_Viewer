@@ -174,7 +174,7 @@ protected:
 	bool _windowReized = false;
 
 	// model loading
-	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/teapot.obj";
+	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/bunny.ply";
 	const std::string _texturePath = "/Users/naoyuki/vk_tutorial/resource/texture.jpg";
 
 	/* timer for fps */

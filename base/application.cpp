@@ -1,4 +1,5 @@
 #include "application.h"
+#include "ply_parser.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "external/stb_image.h"
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -10,15 +11,53 @@ void Application::createShaderStorageBuffers()
 	_shaderStorageBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
 	_shaderStorageBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
 
+	VkDeviceSize sz = sizeof(uint32_t) * _indices.size();
+	if (sz == 0)
+	{
+		// still create tiny host-visible buffers to keep descriptor setup simple
+		sz = sizeof(uint32_t);
+	}
+
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 	{
-		createBuffer(sizeof(uint32_t) * _indices.size(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, _shaderStorageBuffers[i], _shaderStorageBuffersMemory[i]);
-		vkMapMemory(_device, _shaderStorageBuffersMemory[i], 0, sizeof(uint32_t) * _indices.size(), 0, &_shaderStorageBuffersMapped[i]);
+		createBuffer(sz, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, _shaderStorageBuffers[i], _shaderStorageBuffersMemory[i]);
+		vkMapMemory(_device, _shaderStorageBuffersMemory[i], 0, sz, 0, &_shaderStorageBuffersMapped[i]);
 	}
 };
 
 void Application::loadModel()
 {
+	auto ends_with = [](const std::string &s, const std::string &suffix){
+		return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+	};
+
+	_vertices.clear();
+	_indices.clear();
+
+	if (ends_with(_modelPath, ".ply"))
+	{
+		// Load PLY points using our parser
+		std::vector<Gaussian> gs;
+		ParseOptions opts;
+		opts.scaleSpace = ScaleSpace::Linear;
+		opts.rotationOrder = RotationOrder::XYZW;
+		if (!parse_ply(_modelPath, gs, opts))
+		{
+			throw std::runtime_error("Failed to load PLY: " + _modelPath);
+		}
+		_vertices.reserve(gs.size());
+		for (const auto &g : gs)
+		{
+			Vertex v{};
+			v.position = g.position;
+			v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
+			v.texCoord = glm::vec2(0.0f);
+			v.color = glm::clamp(g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
+			_vertices.push_back(v);
+		}
+		return; // no indices for point cloud
+	}
+
 	tinyobj::attrib_t attrib;
 	std::vector<tinyobj::shape_t> shapes;
 	std::vector<tinyobj::material_t> materials;
@@ -361,8 +400,8 @@ void Application::updateUniformBuffer(uint32_t currentFrame)
 
 	UniformBufferObject ubo = {};
 	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	ubo.view = glm::lookAt(glm::vec3(6.0f, 7.0f, 6.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	ubo.proj = glm::perspective(glm::radians(60.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 10.0f);
+	ubo.view = glm::lookAt(glm::vec3(0.f, 0.f, 3.f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+	ubo.proj = glm::perspective(glm::radians(60.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 100.0f);
 	ubo.proj[1][1] *= -1;
 
 	memcpy(_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
@@ -416,6 +455,12 @@ void Application::createDescriptorSetLayout()
 
 void Application::createIndexBuffer()
 {
+	if (_indices.empty())
+	{
+		_indexBuffer = VK_NULL_HANDLE;
+		_indexBufferMemory = VK_NULL_HANDLE;
+		return;
+	}
 	VkDeviceSize bufferSize = sizeof(_indices[0]) * _indices.size();
 	VkBuffer stagingBuffer;
 	VkDeviceMemory stagingBufferMemory;
@@ -723,13 +768,15 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 	VkDeviceSize offsets[] = {0};
 	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-	// bind the index buffer
-	VkBuffer indexBuffer = _indexBuffer;
-	vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
-	// issue the draw command
-	// vertex count, indices count, instance count, first index, index offset, instance offset
-	vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(_indices.size()), 1, 0, 0, 0);
+	if (!_indices.empty())
+	{
+		vkCmdBindIndexBuffer(commandBuffer, _indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(_indices.size()), 1, 0, 0, 0);
+	}
+	else
+	{
+		vkCmdDraw(commandBuffer, static_cast<uint32_t>(_vertices.size()), 1, 0, 0);
+	}
 
 	// End the render pass
 	vkCmdEndRenderPass(commandBuffer);
@@ -832,8 +879,14 @@ void Application::createRenderPass()
 
 void Application::createGraphicsPipeline()
 {
-	auto vertShaderCode = shaderUtils::readFile("/Users/naoyuki/vk_tutorial/shader/triangle.vert.spv");
-	auto fragShaderCode = shaderUtils::readFile("/Users/naoyuki/vk_tutorial/shader/triangle.frag.spv");
+	auto ends_with = [](const std::string &s, const std::string &suffix){
+		return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+	};
+
+	bool usePoints = ends_with(_modelPath, ".ply");
+
+	auto vertShaderCode = shaderUtils::readFile(usePoints ? "/Users/naoyuki/vk_tutorial/shader/point.vert.spv" : "/Users/naoyuki/vk_tutorial/shader/triangle.vert.spv");
+	auto fragShaderCode = shaderUtils::readFile(usePoints ? "/Users/naoyuki/vk_tutorial/shader/point.frag.spv" : "/Users/naoyuki/vk_tutorial/shader/triangle.frag.spv");
 
 	VkShaderModule vertShaderModule = shaderUtils::createShaderModule(_device, vertShaderCode);
 	VkShaderModule fragShaderModule = shaderUtils::createShaderModule(_device, fragShaderCode);
@@ -876,7 +929,7 @@ void Application::createGraphicsPipeline()
 	// input assembly
 	VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
 	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssembly.topology = usePoints ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	inputAssembly.primitiveRestartEnable = VK_FALSE;
 
 	// viewport

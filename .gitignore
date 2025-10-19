@@ -2,3 +2,5 @@
 .DS_Store
 build/
 **/*.spv
+*.ply
+*.spv
