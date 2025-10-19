@@ -14,6 +14,7 @@ set(BASE_SOURCES
     base/application.cpp
     base/camera.cpp
     base/object3d.cpp
+    base/ply_parser.cpp
 )
 
 # Add Objective-C file for macOS
@@ -56,3 +57,33 @@ if(APPLE)
         "-framework QuartzCore"
     )
 endif()
+
+# Test: PLY loader validation (no Vulkan/GLFW deps)
+add_executable(ply_loader_test
+    test/ply_loader_test.cpp
+    base/ply_parser.cpp
+)
+
+# CPU visualization tool
+add_executable(ply_cpu_viz
+    test/ply_cpu_viz.cpp
+    base/ply_parser.cpp
+)
+
+target_include_directories(ply_loader_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/external
+)
+
+target_link_libraries(ply_loader_test PRIVATE
+    glm::glm
+)
+
+target_include_directories(ply_cpu_viz PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/external
+)
+
+target_link_libraries(ply_cpu_viz PRIVATE
+    glm::glm
+)

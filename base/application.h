@@ -78,6 +78,11 @@ private:
 	// CPU pointer to the GPU memory
 	std::vector<void *> _uniformBuffersMapped;
 
+	// SSBO related resources
+	std::vector<VkBuffer> _ssboBuffers;
+	std::vector<VkDeviceMemory> _ssboBuffersMemory;
+	std::vector<void *> _ssboBuffersMapped;
+
 	std::vector<Vertex> _vertices;
 	std::vector<uint32_t> _indices;
 	VkBuffer _vertexBuffer;
