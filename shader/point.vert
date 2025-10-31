@@ -13,5 +13,5 @@ layout(location = 0) out vec3 vColor;
 void main(){
     gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
     vColor = inColor;
-    gl_PointSize = 8.0; // may clamp to 1.0 if largePoints unsupported
+    gl_PointSize = 1.0; // may clamp to 1.0 if largePoints unsupported
 }

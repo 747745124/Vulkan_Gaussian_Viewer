@@ -106,6 +106,21 @@ private:
 	std::vector<VkDeviceMemory> _shaderStorageBuffersMemory;
 	std::vector<void *> _shaderStorageBuffersMapped;
 
+	// Splat (billboard) data for PLY rendering
+	struct SplatInstance { 
+		glm::vec3 center; 
+		glm::vec3 color; 
+		float radius; 
+		glm::vec3 scale; 
+		glm::vec4 rot; 
+		float opacity; 
+	};
+	std::vector<SplatInstance> _splatInstances;
+	VkBuffer _splatVertexBuffer = VK_NULL_HANDLE; // quad corners (vec2)
+	VkDeviceMemory _splatVertexBufferMemory = VK_NULL_HANDLE;
+	VkBuffer _splatInstanceBuffer = VK_NULL_HANDLE; // per-instance data
+	VkDeviceMemory _splatInstanceBufferMemory = VK_NULL_HANDLE;
+
 	void findDepthFormat()
 	{
 		Utils::findSupportedFormat(
@@ -142,6 +157,7 @@ private:
 	void recreateSwapChain();
 	void createIndexBuffer();
 	void createVertexBuffer();
+	void createSplatBuffers();
 	// note that uniform buffers usually vary for each frame
 	void createUniformBuffers();
 	void createCommandBuffer();

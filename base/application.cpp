@@ -33,6 +33,7 @@ void Application::loadModel()
 
 	_vertices.clear();
 	_indices.clear();
+	_splatInstances.clear();
 
 	if (ends_with(_modelPath, ".ply"))
 	{
@@ -46,6 +47,7 @@ void Application::loadModel()
 			throw std::runtime_error("Failed to load PLY: " + _modelPath);
 		}
 		_vertices.reserve(gs.size());
+		_splatInstances.reserve(gs.size());
 		for (const auto &g : gs)
 		{
 			Vertex v{};
@@ -54,8 +56,16 @@ void Application::loadModel()
 			v.texCoord = glm::vec2(0.0f);
 			v.color = glm::clamp(g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
 			_vertices.push_back(v);
+
+			SplatInstance inst{};
+			inst.center = g.position;
+			inst.color = glm::clamp(g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
+			float r = g.scale.x;
+			if (!std::isfinite(r) || r <= 0.0f) r = 0.01f;
+			inst.radius = r;
+			_splatInstances.push_back(inst);
 		}
-		return; // no indices for point cloud
+		return; // indices not used for point/splat cloud
 	}
 
 	tinyobj::attrib_t attrib;
@@ -105,6 +115,45 @@ void Application::loadModel()
 
 			_indices.push_back(uniqueVertices[vertex]);
 		}
+	}
+}
+
+void Application::createSplatBuffers()
+{
+	if (_splatInstances.empty()) return;
+	// Quad corners (triangle strip order)
+	std::array<glm::vec2, 4> corners = { glm::vec2(-1.f, -1.f), glm::vec2(1.f, -1.f), glm::vec2(-1.f, 1.f), glm::vec2(1.f, 1.f) };
+
+	// Vertex buffer for corners
+	{
+		VkDeviceSize bufferSize = sizeof(corners);
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+		void *data;
+		vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+		memcpy(data, corners.data(), bufferSize);
+		vkUnmapMemory(_device, stagingBufferMemory);
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _splatVertexBuffer, _splatVertexBufferMemory);
+		copyBuffer(stagingBuffer, _splatVertexBuffer, bufferSize);
+		vkDestroyBuffer(_device, stagingBuffer, nullptr);
+		vkFreeMemory(_device, stagingBufferMemory, nullptr);
+	}
+
+	// Instance buffer
+	{
+		VkDeviceSize bufferSize = sizeof(SplatInstance) * _splatInstances.size();
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+		void *data;
+		vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+		memcpy(data, _splatInstances.data(), bufferSize);
+		vkUnmapMemory(_device, stagingBufferMemory);
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _splatInstanceBuffer, _splatInstanceBufferMemory);
+		copyBuffer(stagingBuffer, _splatInstanceBuffer, bufferSize);
+		vkDestroyBuffer(_device, stagingBuffer, nullptr);
+		vkFreeMemory(_device, stagingBufferMemory, nullptr);
 	}
 }
 
@@ -399,7 +448,7 @@ void Application::updateUniformBuffer(uint32_t currentFrame)
 	float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
 	UniformBufferObject ubo = {};
-	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.model = glm::mat4(1.0f);
 	ubo.view = glm::lookAt(glm::vec3(0.f, 0.f, 3.f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 	ubo.proj = glm::perspective(glm::radians(60.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 100.0f);
 	ubo.proj[1][1] *= -1;
@@ -717,34 +766,26 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 {
 	VkCommandBufferBeginInfo beginInfo = {};
 	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-	// usage
 	beginInfo.flags = 0;
-	// used for secondary command buffers
 	beginInfo.pInheritanceInfo = nullptr;
-
 	if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
 	{
 		throw std::runtime_error("failed to begin recording command buffer!");
 	}
 
-	// render pass starts
 	VkRenderPassBeginInfo renderPassBeginInfo = {};
 	renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	renderPassBeginInfo.renderPass = _renderPass;
 	renderPassBeginInfo.framebuffer = _swapChainFramebuffers[imageIndex];
 	renderPassBeginInfo.renderArea.offset = {0, 0};
 	renderPassBeginInfo.renderArea.extent = _swapChainExtent;
-
-	VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f}; // Back to black
+	VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
 	VkClearValue clearDepth = {1.0f, 0};
 	VkClearValue clearValues[2] = {clearColor, clearDepth};
 	renderPassBeginInfo.clearValueCount = 2;
 	renderPassBeginInfo.pClearValues = clearValues;
-
 	vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-	// bind to the pipeline, this is a graphics pipeline, not a compute pipeline
 	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _graphicsPipeline);
 
 	VkViewport viewport = {};
@@ -761,26 +802,32 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 	scissor.extent = _swapChainExtent;
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-	// bind the descriptor set
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[_currentFrame], 0, nullptr);
-	// bind the vertex buffer
-	VkBuffer vertexBuffers[] = {_vertexBuffer};
-	VkDeviceSize offsets[] = {0};
-	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-	if (!_indices.empty())
+	auto ends_with = [](const std::string &s, const std::string &suffix){
+		return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+	};
+	bool useSplats = ends_with(_modelPath, ".ply") && !_splatInstances.empty();
+
+	if (useSplats)
 	{
-		vkCmdBindIndexBuffer(commandBuffer, _indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(_indices.size()), 1, 0, 0, 0);
+		VkBuffer bufs[] = { _splatVertexBuffer, _splatInstanceBuffer };
+		VkDeviceSize offs[] = { 0, 0 };
+		vkCmdBindVertexBuffers(commandBuffer, 0, 2, bufs, offs);
+		struct { float w, h; } pc = { (float)_swapChainExtent.width, (float)_swapChainExtent.height };
+		vkCmdPushConstants(commandBuffer, _pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
+		vkCmdDraw(commandBuffer, 4, static_cast<uint32_t>(_splatInstances.size()), 0, 0);
 	}
 	else
 	{
-		vkCmdDraw(commandBuffer, static_cast<uint32_t>(_vertices.size()), 1, 0, 0);
+		VkBuffer vertexBuffers[] = {_vertexBuffer};
+		VkDeviceSize offsets[] = {0};
+		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+		vkCmdBindIndexBuffer(commandBuffer, _indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(_indices.size()), 1, 0, 0, 0);
 	}
 
-	// End the render pass
 	vkCmdEndRenderPass(commandBuffer);
-
 	if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
 	{
 		throw std::runtime_error("failed to record command buffer!");
@@ -883,10 +930,10 @@ void Application::createGraphicsPipeline()
 		return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 	};
 
-	bool usePoints = ends_with(_modelPath, ".ply");
+	bool useSplats = ends_with(_modelPath, ".ply");
 
-	auto vertShaderCode = shaderUtils::readFile(usePoints ? "/Users/naoyuki/vk_tutorial/shader/point.vert.spv" : "/Users/naoyuki/vk_tutorial/shader/triangle.vert.spv");
-	auto fragShaderCode = shaderUtils::readFile(usePoints ? "/Users/naoyuki/vk_tutorial/shader/point.frag.spv" : "/Users/naoyuki/vk_tutorial/shader/triangle.frag.spv");
+	auto vertShaderCode = shaderUtils::readFile(useSplats ? "/Users/naoyuki/vk_tutorial/shader/splat.vert.spv" : "/Users/naoyuki/vk_tutorial/shader/triangle.vert.spv");
+	auto fragShaderCode = shaderUtils::readFile(useSplats ? "/Users/naoyuki/vk_tutorial/shader/splat.frag.spv" : "/Users/naoyuki/vk_tutorial/shader/triangle.frag.spv");
 
 	VkShaderModule vertShaderModule = shaderUtils::createShaderModule(_device, vertShaderCode);
 	VkShaderModule fragShaderModule = shaderUtils::createShaderModule(_device, fragShaderCode);
@@ -915,21 +962,55 @@ void Application::createGraphicsPipeline()
 	dynamicStateInfo.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
 	dynamicStateInfo.pDynamicStates = dynamicStates.data();
 
-	auto vertexInputBindingDescription = Vertex::getBindingDescription();
-	auto vertexInputAttributeDescriptions = Vertex::getAttributeDescriptions();
-
-	// vertex input
 	VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
 	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-	vertexInputInfo.vertexBindingDescriptionCount = 1;
-	vertexInputInfo.pVertexBindingDescriptions = &vertexInputBindingDescription;
-	vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributeDescriptions.size());
-	vertexInputInfo.pVertexAttributeDescriptions = vertexInputAttributeDescriptions.data();
+
+	VkVertexInputBindingDescription bindingDescs[2] = {};
+	VkVertexInputAttributeDescription attrDescs[7] = {};
+	if (useSplats)
+	{
+		// binding 0: quad corners vec2 per-vertex
+		bindingDescs[0].binding = 0;
+		bindingDescs[0].stride = sizeof(glm::vec2);
+		bindingDescs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+		// binding 1: instance data
+		bindingDescs[1].binding = 1;
+		bindingDescs[1].stride = sizeof(SplatInstance);
+		bindingDescs[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+		vertexInputInfo.vertexBindingDescriptionCount = 2;
+		vertexInputInfo.pVertexBindingDescriptions = bindingDescs;
+
+		// location 0: inCorner
+		attrDescs[0].binding = 0; attrDescs[0].location = 0; attrDescs[0].format = VK_FORMAT_R32G32_SFLOAT; attrDescs[0].offset = 0;
+		// location 1: inCenter
+		attrDescs[1].binding = 1; attrDescs[1].location = 1; attrDescs[1].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[1].offset = offsetof(SplatInstance, center);
+		// location 2: inColor
+		attrDescs[2].binding = 1; attrDescs[2].location = 2; attrDescs[2].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[2].offset = offsetof(SplatInstance, color);
+		// location 3: inRadius
+		attrDescs[3].binding = 1; attrDescs[3].location = 3; attrDescs[3].format = VK_FORMAT_R32_SFLOAT; attrDescs[3].offset = offsetof(SplatInstance, radius);
+		// location 4: inScale
+		attrDescs[4].binding = 1; attrDescs[4].location = 4; attrDescs[4].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[4].offset = offsetof(SplatInstance, scale);
+		// location 5: inQuat
+		attrDescs[5].binding = 1; attrDescs[5].location = 5; attrDescs[5].format = VK_FORMAT_R32G32B32A32_SFLOAT; attrDescs[5].offset = offsetof(SplatInstance, rot);
+		// location 6: inOpacity
+		attrDescs[6].binding = 1; attrDescs[6].location = 6; attrDescs[6].format = VK_FORMAT_R32_SFLOAT; attrDescs[6].offset = offsetof(SplatInstance, opacity);
+		vertexInputInfo.vertexAttributeDescriptionCount = 7;
+		vertexInputInfo.pVertexAttributeDescriptions = attrDescs;
+	}
+	else
+	{
+		auto vertexInputBindingDescription = Vertex::getBindingDescription();
+		auto vertexInputAttributeDescriptions = Vertex::getAttributeDescriptions();
+		vertexInputInfo.vertexBindingDescriptionCount = 1;
+		vertexInputInfo.pVertexBindingDescriptions = &vertexInputBindingDescription;
+		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributeDescriptions.size());
+		vertexInputInfo.pVertexAttributeDescriptions = vertexInputAttributeDescriptions.data();
+	}
 
 	// input assembly
 	VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
 	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-	inputAssembly.topology = usePoints ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssembly.topology = useSplats ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	inputAssembly.primitiveRestartEnable = VK_FALSE;
 
 	// viewport
@@ -949,9 +1030,6 @@ void Application::createGraphicsPipeline()
 	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 	viewportState.viewportCount = 1;
 	viewportState.scissorCount = 1;
-	// if we are not using dynamic state, we need to set the viewport and scissor
-	//  viewportState.pViewports = &viewport;
-	//  viewportState.pScissors = &scissor;
 
 	// rasterizer
 	VkPipelineRasterizationStateCreateInfo rasterizer = {};
@@ -962,68 +1040,73 @@ void Application::createGraphicsPipeline()
 	rasterizer.lineWidth = 1.0f;
 	rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
 	rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-
 	rasterizer.depthBiasEnable = VK_FALSE;
-	rasterizer.depthBiasConstantFactor = 0.0f;
-	rasterizer.depthBiasClamp = 0.0f;
-	rasterizer.depthBiasSlopeFactor = 0.0f;
 
-	// MSAA, disable for now
+	// MSAA
 	VkPipelineMultisampleStateCreateInfo multisampling = {};
 	multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 	multisampling.sampleShadingEnable = VK_FALSE;
 	multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-	multisampling.minSampleShading = 1.0f;
-	multisampling.pSampleMask = nullptr;
-	multisampling.alphaToCoverageEnable = VK_FALSE;
-	multisampling.alphaToOneEnable = VK_FALSE;
 
-	// depth and stencil testing, optional
+	// depth
 	VkPipelineDepthStencilStateCreateInfo depthStencil = {};
 	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-	depthStencil.depthTestEnable = VK_TRUE;
-	depthStencil.depthWriteEnable = VK_TRUE;
+	if (useSplats)
+	{
+		depthStencil.depthTestEnable = VK_FALSE;
+		depthStencil.depthWriteEnable = VK_FALSE;
+	}
+	else
+	{
+		depthStencil.depthTestEnable = VK_TRUE;
+		depthStencil.depthWriteEnable = VK_TRUE;
+	}
 	depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
 	depthStencil.depthBoundsTestEnable = VK_FALSE;
 	depthStencil.stencilTestEnable = VK_FALSE;
 
-	// Color blending, an simple overwrite here
+	// blending
 	VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
 	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-	colorBlendAttachment.blendEnable = VK_FALSE;
-	colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-	colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-	colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-	colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-	colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-	colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+	if (useSplats)
+	{
+		colorBlendAttachment.blendEnable = VK_TRUE;
+		colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+		colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+	}
+	else
+	{
+		colorBlendAttachment.blendEnable = VK_FALSE;
+	}
 
-	// blending, disable for now
 	VkPipelineColorBlendStateCreateInfo colorBlending = {};
 	colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 	colorBlending.logicOpEnable = VK_FALSE;
-	colorBlending.logicOp = VK_LOGIC_OP_COPY;
 	colorBlending.attachmentCount = 1;
 	colorBlending.pAttachments = &colorBlendAttachment;
-	colorBlending.blendConstants[0] = 0.0f;
-	colorBlending.blendConstants[1] = 0.0f;
-	colorBlending.blendConstants[2] = 0.0f;
-	colorBlending.blendConstants[3] = 0.0f;
 
-	// pipeline layout, we'll specify the uniforms later
+	// pipeline layout (add push constants for splats)
+	VkPushConstantRange pcRange = {};
+	pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	pcRange.offset = 0;
+	pcRange.size = sizeof(float) * 2;
+
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
 	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pipelineLayoutInfo.setLayoutCount = 1;
 	pipelineLayoutInfo.pSetLayouts = &_descriptorSetLayout;
-	pipelineLayoutInfo.pushConstantRangeCount = 0;
-	pipelineLayoutInfo.pPushConstantRanges = nullptr;
+	pipelineLayoutInfo.pushConstantRangeCount = 1;
+	pipelineLayoutInfo.pPushConstantRanges = &pcRange;
 
 	if (vkCreatePipelineLayout(_device, &pipelineLayoutInfo, nullptr, &_pipelineLayout) != VK_SUCCESS)
 	{
 		throw std::runtime_error("failed to create pipeline layout!");
 	}
 
-	// create the pipeline
 	VkGraphicsPipelineCreateInfo pipelineInfo = {};
 	pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	pipelineInfo.stageCount = 2;
@@ -1039,7 +1122,6 @@ void Application::createGraphicsPipeline()
 	pipelineInfo.layout = _pipelineLayout;
 	pipelineInfo.renderPass = _renderPass;
 	pipelineInfo.subpass = 0;
-
 	pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 	pipelineInfo.basePipelineIndex = -1;
 
@@ -1383,6 +1465,7 @@ Application::Application()
 	loadModel();
 	createVertexBuffer();
 	createIndexBuffer();
+	createSplatBuffers();
 	createUniformBuffers();
 	createShaderStorageBuffers();
 
@@ -1450,6 +1533,23 @@ Application::~Application()
 	if (_indexBufferMemory != VK_NULL_HANDLE)
 	{
 		vkFreeMemory(_device, _indexBufferMemory, nullptr);
+	}
+
+	if (_splatVertexBuffer != VK_NULL_HANDLE)
+	{
+		vkDestroyBuffer(_device, _splatVertexBuffer, nullptr);
+	}
+	if (_splatVertexBufferMemory != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(_device, _splatVertexBufferMemory, nullptr);
+	}
+	if (_splatInstanceBuffer != VK_NULL_HANDLE)
+	{
+		vkDestroyBuffer(_device, _splatInstanceBuffer, nullptr);
+	}
+	if (_splatInstanceBufferMemory != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(_device, _splatInstanceBufferMemory, nullptr);
 	}
 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
