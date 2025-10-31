@@ -34,19 +34,35 @@ bool parse_ply(const std::string &filename, std::vector<Gaussian> &gaussians, co
             return false;
         }
 
-        // Discover dynamic f_rest_* properties from header
+        // Discover properties from header on the vertex element
         std::vector<std::string> frestProps;
+        bool hasFdc0 = false, hasFdc1 = false, hasFdc2 = false;
+        bool hasRGB = false; // legacy color (red,green,blue)
+        bool hasOpacityHeader = false;
+        bool hasScaleHeader = false;
+        bool hasRotHeader = false;
         for (const auto &elem : pf.get_elements())
         {
             if (elem.name == "vertex")
             {
+                int rgbCount = 0;
+                int scaleCount = 0;
+                int rotCount = 0;
                 for (const auto &prop : elem.properties)
                 {
-                    if (prop.name.rfind("f_rest_", 0) == 0)
-                    {
-                        frestProps.push_back(prop.name);
-                    }
+                    const std::string &n = prop.name;
+                    if (n.rfind("f_rest_", 0) == 0) frestProps.push_back(n);
+                    if (n == "f_dc_0") hasFdc0 = true;
+                    if (n == "f_dc_1") hasFdc1 = true;
+                    if (n == "f_dc_2") hasFdc2 = true;
+                    if (n == "red" || n == "green" || n == "blue") rgbCount++;
+                    if (n == "opacity") hasOpacityHeader = true;
+                    if (n == "scale_0" || n == "scale_1" || n == "scale_2") scaleCount++;
+                    if (n == "rot_0" || n == "rot_1" || n == "rot_2" || n == "rot_3") rotCount++;
                 }
+                hasRGB = (rgbCount >= 3);
+                hasScaleHeader = (scaleCount >= 3);
+                hasRotHeader = (rotCount >= 4);
             }
         }
         std::sort(frestProps.begin(), frestProps.end(), [](const std::string &a, const std::string &b) {
@@ -73,13 +89,46 @@ bool parse_ply(const std::string &filename, std::vector<Gaussian> &gaussians, co
 
         pf.read(is);
 
+        // Log a brief summary of available attributes
+        size_t N = pos ? pos->count : 0;
+        bool hasFdc = (hasFdc0 && hasFdc1 && hasFdc2) || (fdc && fdc->count > 0);
+        size_t restCount = frestProps.size();
+        int perColorRest = (restCount % 3 == 0) ? static_cast<int>(restCount / 3) : -1;
+        int L = -1;
+        if (perColorRest >= 0)
+        {
+            // total coefficients per color = perColorRest + 1 (adding DC)
+            // (L+1)^2 = perColorRest + 1  =>  L = sqrt(perColorRest + 1) - 1
+            double totalPerColor = static_cast<double>(perColorRest + 1);
+            L = static_cast<int>(std::round(std::sqrt(totalPerColor) - 1.0));
+        }
+        std::cout << "[PLY] vertices: " << N
+                  << ", color(DC f_dc_0..2): " << (hasFdc ? "yes" : "no")
+                  << ", legacy RGB: " << (hasRGB ? "yes" : "no")
+                  << ", opacity: " << (hasOpacityHeader ? "yes" : "no")
+                  << ", scale: " << (hasScaleHeader ? "yes" : "no")
+                  << ", rot: " << (hasRotHeader ? "yes" : "no")
+                  << std::endl;
+        if (restCount > 0)
+        {
+            std::cout << "[PLY] SH higher-order present: yes, rest floats per vertex: " << restCount;
+            if (L >= 0)
+            {
+                std::cout << ", estimated degree L ≈ " << L << " (per color coeffs = " << (perColorRest + 1) << ")";
+            }
+            std::cout << std::endl;
+        }
+        else
+        {
+            std::cout << "[PLY] SH higher-order present: no" << std::endl;
+        }
+
         if (!pos)
         {
             std::cerr << "PLY missing vertex positions (x,y,z)" << std::endl;
             return false;
         }
 
-        const size_t N = pos->count;
         gaussians.clear();
         gaussians.resize(N);
 

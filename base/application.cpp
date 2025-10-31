@@ -35,13 +35,14 @@ void Application::loadModel()
 	_indices.clear();
 	_splatInstances.clear();
 
-	if (ends_with(_modelPath, ".ply"))
+    if (ends_with(_modelPath, ".ply"))
 	{
 		// Load PLY points using our parser
 		std::vector<Gaussian> gs;
 		ParseOptions opts;
-		opts.scaleSpace = ScaleSpace::Linear;
-		opts.rotationOrder = RotationOrder::XYZW;
+
+        opts.scaleSpace = ScaleSpace::Log;
+        opts.rotationOrder = RotationOrder::WXYZ;
 		if (!parse_ply(_modelPath, gs, opts))
 		{
 			throw std::runtime_error("Failed to load PLY: " + _modelPath);
@@ -57,13 +58,16 @@ void Application::loadModel()
 			v.color = glm::clamp(g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
 			_vertices.push_back(v);
 
-			SplatInstance inst{};
-			inst.center = g.position;
-			inst.color = glm::clamp(g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
-			float r = g.scale.x;
-			if (!std::isfinite(r) || r <= 0.0f) r = 0.01f;
-			inst.radius = r;
-			_splatInstances.push_back(inst);
+            SplatInstance inst{};
+            inst.center = g.position;
+            inst.color = glm::clamp(g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
+            float r = g.scale.x;
+            if (!std::isfinite(r) || r <= 0.0f) r = 0.01f;
+            inst.radius = r;
+            inst.scale = glm::max(g.scale, glm::vec3(1e-4f));
+            inst.rot = glm::vec4(g.rot.w, g.rot.x, g.rot.y, g.rot.z);
+            inst.opacity = glm::clamp(g.opacity, 0.0f, 1.0f);
+            _splatInstances.push_back(inst);
 		}
 		return; // indices not used for point/splat cloud
 	}
@@ -120,7 +124,22 @@ void Application::loadModel()
 
 void Application::createSplatBuffers()
 {
-	if (_splatInstances.empty()) return;
+    if (_splatInstances.empty()) return;
+    // One-time back-to-front sort using current camera state
+    glm::vec3 forward(
+        cosf(_camPitch) * cosf(_camYaw),
+        sinf(_camPitch),
+        cosf(_camPitch) * sinf(_camYaw));
+    forward = glm::normalize(forward);
+    glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+    glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
+    glm::vec3 up = glm::normalize(glm::cross(right, forward));
+    glm::mat4 viewOnce = glm::lookAt(_camPos, _camPos + forward, up);
+    std::stable_sort(_splatInstances.begin(), _splatInstances.end(), [&](const SplatInstance& a, const SplatInstance& b){
+        float za = (viewOnce * glm::vec4(a.center, 1.0f)).z;
+        float zb = (viewOnce * glm::vec4(b.center, 1.0f)).z;
+        return za < zb; // farther (more negative) first
+    });
 	// Quad corners (triangle strip order)
 	std::array<glm::vec2, 4> corners = { glm::vec2(-1.f, -1.f), glm::vec2(1.f, -1.f), glm::vec2(-1.f, 1.f), glm::vec2(1.f, 1.f) };
 
@@ -447,14 +466,80 @@ void Application::updateUniformBuffer(uint32_t currentFrame)
 	auto currentTime = std::chrono::high_resolution_clock::now();
 	float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+	// build camera basis from yaw/pitch
+	glm::vec3 forward(
+		cosf(_camPitch) * cosf(_camYaw),
+		sinf(_camPitch),
+		cosf(_camPitch) * sinf(_camYaw));
+	forward = glm::normalize(forward);
+	glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+	glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
+	glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+	glm::mat4 view = glm::lookAt(_camPos, _camPos + forward, up);
+
 	UniformBufferObject ubo = {};
 	ubo.model = glm::mat4(1.0f);
-	ubo.view = glm::lookAt(glm::vec3(0.f, 0.f, 3.f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+	ubo.view = view;
 	ubo.proj = glm::perspective(glm::radians(60.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 100.0f);
 	ubo.proj[1][1] *= -1;
 
-	memcpy(_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
+    memcpy(_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
 };
+
+void Application::sortAndUploadSplatsPerFrame(const glm::mat4& view)
+{
+	if (_splatInstances.empty()) return;
+	// sort back-to-front (more negative z first)
+	std::stable_sort(_splatInstances.begin(), _splatInstances.end(), [&](const SplatInstance& a, const SplatInstance& b){
+		float za = (view * glm::vec4(a.center, 1.0f)).z;
+		float zb = (view * glm::vec4(b.center, 1.0f)).z;
+		return za < zb;
+	});
+	// upload via staging to existing device-local buffer
+	VkDeviceSize bufferSize = sizeof(SplatInstance) * _splatInstances.size();
+	VkBuffer stagingBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingMemory);
+	void* data = nullptr;
+	vkMapMemory(_device, stagingMemory, 0, bufferSize, 0, &data);
+	memcpy(data, _splatInstances.data(), bufferSize);
+	vkUnmapMemory(_device, stagingMemory);
+	copyBuffer(stagingBuffer, _splatInstanceBuffer, bufferSize);
+	vkDestroyBuffer(_device, stagingBuffer, nullptr);
+	vkFreeMemory(_device, stagingMemory, nullptr);
+}
+
+void Application::handleInput()
+{
+	const float dt = _deltaTime;
+	glm::vec3 move(0.0f);
+
+	// rebuild forward/right from current yaw/pitch
+	glm::vec3 forward(
+		cosf(_camPitch) * cosf(_camYaw),
+		sinf(_camPitch),
+		cosf(_camPitch) * sinf(_camYaw));
+	forward = glm::normalize(forward);
+	glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+	glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
+
+	// WASD/EQ movement
+	if (_keyboardInput.keyStates[GLFW_KEY_W] == GLFW_PRESS) move += forward;
+	if (_keyboardInput.keyStates[GLFW_KEY_S] == GLFW_PRESS) move -= forward;
+	if (_keyboardInput.keyStates[GLFW_KEY_D] == GLFW_PRESS) move += right;
+	if (_keyboardInput.keyStates[GLFW_KEY_A] == GLFW_PRESS) move -= right;
+	if (_keyboardInput.keyStates[GLFW_KEY_E] == GLFW_PRESS) move += worldUp;
+	if (_keyboardInput.keyStates[GLFW_KEY_Q] == GLFW_PRESS) move -= worldUp;
+	if (glm::length(move) > 0.0f) _camPos += glm::normalize(move) * _camSpeed * dt;
+
+	// Arrow keys to adjust yaw/pitch
+	if (_keyboardInput.keyStates[GLFW_KEY_LEFT] == GLFW_PRESS)  _camYaw   -= _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_RIGHT] == GLFW_PRESS) _camYaw   += _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_UP] == GLFW_PRESS)    _camPitch += _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_DOWN] == GLFW_PRESS)  _camPitch -= _camTurnSpeed * dt;
+	_camPitch = glm::clamp(_camPitch, glm::radians(-89.0f), glm::radians(89.0f));
+}
 
 void Application::createUniformBuffers()
 {
