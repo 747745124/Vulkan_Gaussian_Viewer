@@ -46,7 +46,7 @@ void Application::loadModel()
 		ParseOptions opts;
 
         opts.scaleSpace = ScaleSpace::Log;
-        opts.rotationOrder = RotationOrder::XYZW;
+        opts.rotationOrder = RotationOrder::WXYZ;
 		if (!parse_ply(_modelPath, gs, opts))
 		{
 			throw std::runtime_error("Failed to load PLY: " + _modelPath);
@@ -71,7 +71,7 @@ void Application::loadModel()
             if (!std::isfinite(r) || r <= 0.0f) r = 0.01f;
             inst.radius = r;
             inst.scale = glm::max(g.scale, glm::vec3(1e-4f));
-            inst.rot = glm::vec4(g.rot.w, g.rot.x, g.rot.y, g.rot.z);
+            inst.rot = glm::vec4(g.rot.x, g.rot.y, g.rot.z, g.rot.w);
 		inst.opacity = 1.0f / (1.0f + std::exp(-g.opacity));
             _splatInstances.push_back(inst);
 		}
@@ -1249,7 +1249,7 @@ void Application::createGraphicsPipeline()
 	rasterizer.rasterizerDiscardEnable = VK_FALSE;
 	rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
 	rasterizer.lineWidth = 1.0f;
-	rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+	rasterizer.cullMode = VK_CULL_MODE_NONE;
 	rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 	rasterizer.depthBiasEnable = VK_FALSE;
 
