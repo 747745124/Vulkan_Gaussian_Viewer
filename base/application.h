@@ -166,6 +166,7 @@ private:
 	void createDescriptorSets();
 	void updateUniformBuffer(uint32_t currentFrame);
     void sortAndUploadSplatsPerFrame(const glm::mat4& view);
+	void debugComputeAnisoCPU(size_t count = 8);
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 	void printInstanceExtensionSupport();

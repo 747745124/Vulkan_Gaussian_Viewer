@@ -3,6 +3,7 @@
 #include <cfloat>
 #include <cmath>
 #include <iostream>
+#include <iomanip>
 #define STB_IMAGE_IMPLEMENTATION
 #include "external/stb_image.h"
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -546,6 +547,123 @@ void Application::handleInput()
 	if (_keyboardInput.keyStates[GLFW_KEY_UP] == GLFW_PRESS)    _camPitch += _camTurnSpeed * dt;
 	if (_keyboardInput.keyStates[GLFW_KEY_DOWN] == GLFW_PRESS)  _camPitch -= _camTurnSpeed * dt;
 	_camPitch = glm::clamp(_camPitch, glm::radians(-89.0f), glm::radians(89.0f));
+
+	// Debug: compute anisotropic ellipse on CPU for a few splats (press C)
+	if (_keyboardInput.keyStates[GLFW_KEY_C] == GLFW_PRESS) {
+		static bool printed = false;
+		if (!printed) {
+			debugComputeAnisoCPU(6);
+			printed = true;
+		}
+	} else {
+		// reset latch when key released
+		// allows re-printing on next press
+		static bool printed = false; printed = false;
+	}
+}
+// CPU-side verification of anisotropic ellipse math (compares XYZW vs WXYZ)
+void Application::debugComputeAnisoCPU(size_t count)
+{
+	if (_splatInstances.empty()) {
+		std::cout << "[CPU-Aniso] No splats loaded." << std::endl;
+		return;
+	}
+
+	glm::vec2 viewport((float)_swapChainExtent.width, (float)_swapChainExtent.height);
+
+	// Rebuild current view/proj (matches what we upload to UBO)
+	glm::vec3 forward(
+		cosf(_camPitch) * cosf(_camYaw),
+		sinf(_camPitch),
+		cosf(_camPitch) * sinf(_camYaw));
+	forward = glm::normalize(forward);
+	glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+	glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
+	glm::vec3 up = glm::normalize(glm::cross(right, forward));
+	glm::mat4 view = glm::lookAt(_camPos, _camPos + forward, up);
+	glm::mat4 proj = glm::perspective(glm::radians(60.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 100.0f);
+	proj[1][1] *= -1.0f;
+
+	float fx = std::abs(proj[0][0]) * viewport.x * 0.5f;
+	float fy = std::abs(proj[1][1]) * viewport.y * 0.5f;
+
+	std::cout << std::fixed << std::setprecision(5);
+	std::cout << "[CPU-Aniso] viewport=" << viewport.x << "x" << viewport.y
+			  << " fx=" << fx << " fy=" << fy << std::endl;
+
+	for (size_t i = 0; i < std::min(count, _splatInstances.size()); ++i) {
+		const auto& s = _splatInstances[i];
+		glm::vec4 worldCenter(s.center, 1.0f);
+		glm::vec4 cam = view * worldCenter;
+		glm::vec4 pos2d = proj * cam;
+		float z = std::max(1e-3f, -cam.z);
+		glm::vec2 ndcCenter = glm::vec2(pos2d) / pos2d.w;
+
+		// Helper: build rotation matrix from quaternion (wxyz)
+		auto rotToMat = [](float w, float x, float y, float z) {
+			glm::mat3 R;
+			R[0][0] = 1.0f - 2.0f * (y*y + z*z);
+			R[0][1] = 2.0f * (x*y + w*z);
+			R[0][2] = 2.0f * (x*z - w*y);
+			R[1][0] = 2.0f * (x*y - w*z);
+			R[1][1] = 1.0f - 2.0f * (x*x + z*z);
+			R[1][2] = 2.0f * (y*z + w*x);
+			R[2][0] = 2.0f * (x*z + w*y);
+			R[2][1] = 2.0f * (y*z - w*x);
+			R[2][2] = 1.0f - 2.0f * (x*x + y*y);
+			return R;
+		};
+
+		glm::mat3 S(0.0f);
+		S[0][0] = std::max(s.scale.x, 1e-4f);
+		S[1][1] = std::max(s.scale.y, 1e-4f);
+		S[2][2] = std::max(s.scale.z, 1e-4f);
+
+		// Try WXYZ
+		glm::vec4 qWxyz = glm::normalize(s.rot);
+		glm::mat3 RWxyz = rotToMat(qWxyz.x, qWxyz.y, qWxyz.z, qWxyz.w);
+		glm::mat3 MWxyz = S * RWxyz;
+		glm::mat3 Vw = glm::transpose(MWxyz) * MWxyz; // M^T M
+
+		// Try XYZW (convert to wxyz)
+		glm::vec4 qXyzw = glm::normalize(glm::vec4(s.rot.w, s.rot.x, s.rot.y, s.rot.z));
+		glm::mat3 RXyzw = rotToMat(qXyzw.x, qXyzw.y, qXyzw.z, qXyzw.w);
+		glm::mat3 MXyzw = S * RXyzw;
+		glm::mat3 Vx = glm::transpose(MXyzw) * MXyzw;
+
+		glm::mat3 J(0.0f);
+		J[0][0] = fx / z; J[0][2] = -(fx * cam.x) / (z * z);
+		J[1][1] = -fy / z; J[1][2] = (fy * cam.y) / (z * z);
+
+		glm::mat3 Tv = glm::transpose(glm::mat3(view)) * J;
+		auto projectCov = [&](const glm::mat3& V){ return glm::transpose(Tv) * V * Tv; };
+		glm::mat3 Cw = projectCov(Vw);
+		glm::mat3 Cx = projectCov(Vx);
+
+		auto eigAxes = [&](const glm::mat3& C){
+			float a = C[0][0];
+			float b = C[0][1];
+			float d = C[1][1];
+			float mid = 0.5f * (a + d);
+			float rad = glm::length(glm::vec2(0.5f * (a - d), b));
+			float l1 = mid + rad;
+			float l2 = mid - rad;
+			glm::vec2 diag = glm::normalize(glm::vec2(b, l1 - a));
+			glm::vec2 major = (l1 > 0.0f ? std::sqrt(2.0f * l1) : 0.0f) * diag;
+			glm::vec2 minor = (l2 > 0.0f ? std::sqrt(2.0f * l2) : 0.0f) * glm::vec2(diag.y, -diag.x);
+			return std::tuple<float,float,glm::vec2,glm::vec2>(l1,l2,major,minor);
+		};
+
+		auto [l1w, l2w, majw, minw] = eigAxes(Cw);
+		auto [l1x, l2x, majx, minx] = eigAxes(Cx);
+
+		std::cout << "[CPU-Aniso][" << i << "] cam.z=" << cam.z << " pos2d.w=" << pos2d.w
+				  << " centerNDC=(" << ndcCenter.x << "," << ndcCenter.y << ")\n";
+		std::cout << "   WXYZ: l1=" << l1w << " l2=" << l2w
+				  << " |maj|=" << glm::length(majw) << " |min|=" << glm::length(minw) << std::endl;
+		std::cout << "   XYZW: l1=" << l1x << " l2=" << l2x
+				  << " |maj|=" << glm::length(majx) << " |min|=" << glm::length(minx) << std::endl;
+	}
 }
 
 void Application::createUniformBuffers()
