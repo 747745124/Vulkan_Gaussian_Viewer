@@ -144,7 +144,7 @@ void Application::createSplatBuffers()
     std::stable_sort(_splatInstances.begin(), _splatInstances.end(), [&](const SplatInstance& a, const SplatInstance& b){
         float za = (viewOnce * glm::vec4(a.center, 1.0f)).z;
         float zb = (viewOnce * glm::vec4(b.center, 1.0f)).z;
-        return za < zb; // farther (more negative) first
+        return za > zb; 
     });
 	// Quad corners (triangle strip order)
 	std::array<glm::vec2, 4> corners = { glm::vec2(-1.f, -1.f), glm::vec2(1.f, -1.f), glm::vec2(-1.f, 1.f), glm::vec2(1.f, 1.f) };
@@ -502,7 +502,7 @@ void Application::sortAndUploadSplatsPerFrame(const glm::mat4& view)
 	std::stable_sort(_splatInstances.begin(), _splatInstances.end(), [&](const SplatInstance& a, const SplatInstance& b){
 		float za = (view * glm::vec4(a.center, 1.0f)).z;
 		float zb = (view * glm::vec4(b.center, 1.0f)).z;
-		return za < zb;
+		return za > zb;
 	});
 	// upload via staging to existing device-local buffer
 	VkDeviceSize bufferSize = sizeof(SplatInstance) * _splatInstances.size();
