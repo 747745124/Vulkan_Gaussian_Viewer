@@ -46,7 +46,7 @@ void main() {
         0.0, 0.0, inScale.z
     );
 
-    mat3 M = transpose(R) * S;
+    mat3 M = R * S;
     mat3 Vrk = M * transpose(M);
 
     // --- 3. 计算投影 2D 协方差 ---
@@ -55,8 +55,8 @@ void main() {
     float p_z = max(1e-3, -cam.z); // View-space Z (正值)
     
     mat3 J = mat3(
-        fx / p_z, 0.0, -(fx * cam.x) / (p_z * p_z),
-        0.0, -fy / p_z, (fy * cam.y) / (p_z * p_z),
+        -fx / p_z, 0.0, -(fx * cam.x) / (p_z * p_z),
+        0.0, fy / p_z, (fy * cam.y) / (p_z * p_z),
         0.0, 0.0, 0.0
     );
     
@@ -83,9 +83,9 @@ void main() {
     // --- 5. 计算最终位置和颜色 ---
     
     // ** 修正 #3: 正确的 Vulkan depth fade **
-    float depthFade = pos2d.z / pos2d.w; // [0, 1] 范围
+    float depthFade = clamp(pos2d.z / pos2d.w + 1.0, 0.0, 1.0);
     
-    vColor = vec4(inColor * depthFade, inOpacity);
+    vColor = vec4(inColor, inOpacity) * depthFade;
     
     // 传递给 frag shader 的高斯坐标 (范围 [-2, 2])
     vPosition = inCorner * 2.0; 
@@ -95,7 +95,7 @@ void main() {
     // 转换: 像素偏移 -> NDC 偏移
     // (pixel_offset / (viewport / 2.0)) = (pixel_offset * 2.0 / viewport)
     
-    vec2 offset = (vPosition.x * majorAxis + vPosition.y * minorAxis) * 2.0 / pc.viewport;
+    vec2 offset = (vPosition.x * majorAxis + vPosition.y * minorAxis) / pc.viewport;
 
     gl_Position = vec4(vCenter + offset, 0.0, 1.0);
 }

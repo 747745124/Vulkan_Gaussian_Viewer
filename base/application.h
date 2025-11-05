@@ -192,7 +192,7 @@ protected:
 	bool _windowReized = false;
 
 	// model loading
-	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/book.ply";
+	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/train_hp.ply";
 	const std::string _texturePath = "/Users/naoyuki/vk_tutorial/resource/texture.jpg";
 
 	/* timer for fps */
@@ -209,6 +209,7 @@ protected:
 	float _camPitch = 0.0f;
 	float _camSpeed = 2.0f; // units per second
 	float _camTurnSpeed = 1.5f; // radians per second
+	float _camRoll = 0.0f; // roll angle in radians (CCW positive)
 	glm::vec3 _camPosPrev = _camPos;
 	float _camYawPrev = _camYaw;
 	float _camPitchPrev = _camPitch;

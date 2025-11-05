@@ -60,7 +60,7 @@ void Application::loadModel()
 			v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
 			v.texCoord = glm::vec2(0.0f);
 		const float SH_C0 = 0.28209479177387814f;
-		glm::vec3 baseColor = glm::clamp(glm::vec3(0.5f) + SH_C0 * g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
+		glm::vec3 baseColor = glm::vec3(0.25f) + SH_C0 * g.f_dc_0;
 		v.color = baseColor;
 			_vertices.push_back(v);
 
@@ -476,6 +476,12 @@ void Application::updateUniformBuffer(uint32_t currentFrame)
 	glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
 	glm::vec3 up = glm::normalize(glm::cross(right, forward));
 
+	// Apply camera roll around the forward axis
+	glm::mat4 rollM = glm::rotate(glm::mat4(1.0f), _camRoll, forward);
+	glm::mat3 rollR = glm::mat3(rollM);
+	right = rollR * right;
+	up    = rollR * up;
+
 	glm::mat4 view = glm::lookAt(_camPos, _camPos + forward, up);
 
 	UniformBufferObject ubo = {};
@@ -547,6 +553,10 @@ void Application::handleInput()
 	if (_keyboardInput.keyStates[GLFW_KEY_UP] == GLFW_PRESS)    _camPitch += _camTurnSpeed * dt;
 	if (_keyboardInput.keyStates[GLFW_KEY_DOWN] == GLFW_PRESS)  _camPitch -= _camTurnSpeed * dt;
 	_camPitch = glm::clamp(_camPitch, glm::radians(-89.0f), glm::radians(89.0f));
+
+	// Camera roll (CCW/CW) using Z/X keys
+	if (_keyboardInput.keyStates[GLFW_KEY_Z] == GLFW_PRESS) _camRoll += _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_X] == GLFW_PRESS) _camRoll -= _camTurnSpeed * dt;
 
 	// Debug: compute anisotropic ellipse on CPU for a few splats (press C)
 	if (_keyboardInput.keyStates[GLFW_KEY_C] == GLFW_PRESS) {
