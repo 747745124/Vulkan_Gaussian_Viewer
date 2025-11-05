@@ -45,7 +45,7 @@ void Application::loadModel()
 		ParseOptions opts;
 
         opts.scaleSpace = ScaleSpace::Log;
-        opts.rotationOrder = RotationOrder::WXYZ;
+        opts.rotationOrder = RotationOrder::XYZW;
 		if (!parse_ply(_modelPath, gs, opts))
 		{
 			throw std::runtime_error("Failed to load PLY: " + _modelPath);
@@ -871,7 +871,8 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 	renderPassBeginInfo.framebuffer = _swapChainFramebuffers[imageIndex];
 	renderPassBeginInfo.renderArea.offset = {0, 0};
 	renderPassBeginInfo.renderArea.extent = _swapChainExtent;
-	VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
+    // Step 4: clear alpha to 0 so blending accumulates from transparent background
+    VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 0.0f};
 	VkClearValue clearDepth = {1.0f, 0};
 	VkClearValue clearValues[2] = {clearColor, clearDepth};
 	renderPassBeginInfo.clearValueCount = 2;
@@ -1162,8 +1163,14 @@ void Application::createGraphicsPipeline()
 	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     if (useSplats)
     {
-        // Step 1: disable blending to ensure visibility
-        colorBlendAttachment.blendEnable = VK_FALSE;
+        // Step 4: premultiplied alpha blending like main.js
+        colorBlendAttachment.blendEnable = VK_TRUE;
+        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
     }
 	else
 	{

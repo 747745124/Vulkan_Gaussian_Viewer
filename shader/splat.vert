@@ -13,7 +13,7 @@ layout(location = 4) in vec3 inScale;          // per-instance (unused in this s
 layout(location = 5) in vec4 inQuat;           // per-instance (unused in this step)
 layout(location = 6) in float inOpacity;       // per-instance (unused in this step)
 
-layout(location = 0) out vec3 vColor;
+layout(location = 0) out vec4 vColor;
 layout(location = 1) out vec2 vPosition;       // not used in this step
 
 layout(push_constant) uniform PushConstants {
@@ -25,19 +25,24 @@ void main(){
     vec4 cam = ubo.view * vec4(inCenter, 1.0);
     vec4 pos2d = ubo.proj * cam;
 
-    // Clip against a slightly expanded frustum like the JS implementation
-    float clip = 1.2 * pos2d.w;
-    if (pos2d.z < -clip || pos2d.x < -clip || pos2d.x > clip || pos2d.y < -clip || pos2d.y > clip || pos2d.w <= 0.0) {
+    // Keep only behind-camera reject for safety
+    if (pos2d.w <= 0.0) {
         gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
         return;
     }
 
-    // Baseline: draw a small constant-size quad in screen space (e.g. 10 px)
+    // Revert to Step 5: isotropic Gaussian size from depth & focal
     vec2 center = pos2d.xy / pos2d.w;
-    float pixelSize = 10.0;
-    vec2 offset = inCorner * (pixelSize / pc.viewport) * 2.0;
+    float z = max(1e-3, -cam.z);
+    float fx = abs(ubo.proj[0][0]) * pc.viewport.x * 0.5;
+    float fy = abs(ubo.proj[1][1]) * pc.viewport.y * 0.5;
+    float s = max(max(inScale.x, inScale.y), inScale.z);
+    float sigmaX = s * fx / z;
+    float sigmaY = s * fy / z;
 
-    vColor = inColor;
-    vPosition = inCorner * 2.0; // not used in this step
+    float depthFade = clamp(pos2d.z / pos2d.w + 1.0, 0.0, 1.0);
+    vColor = vec4(inColor * depthFade, inOpacity);
+    vPosition = inCorner * 2.0; // Gaussian domain units
+    vec2 offset = vec2(vPosition.x * sigmaX, vPosition.y * sigmaY) / pc.viewport * 2.0;
     gl_Position = vec4(center + offset, 0.0, 1.0);
 }
