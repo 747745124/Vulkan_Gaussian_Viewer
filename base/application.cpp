@@ -1,5 +1,8 @@
 #include "application.h"
 #include "ply_parser.h"
+#include <cfloat>
+#include <cmath>
+#include <iostream>
 #define STB_IMAGE_IMPLEMENTATION
 #include "external/stb_image.h"
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -55,18 +58,20 @@ void Application::loadModel()
 			v.position = g.position;
 			v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
 			v.texCoord = glm::vec2(0.0f);
-			v.color = glm::clamp(g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
+		const float SH_C0 = 0.28209479177387814f;
+		glm::vec3 baseColor = glm::clamp(glm::vec3(0.5f) + SH_C0 * g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
+		v.color = baseColor;
 			_vertices.push_back(v);
 
             SplatInstance inst{};
             inst.center = g.position;
-            inst.color = glm::clamp(g.f_dc_0, glm::vec3(0.0f), glm::vec3(1.0f));
+		inst.color = baseColor;
             float r = g.scale.x;
             if (!std::isfinite(r) || r <= 0.0f) r = 0.01f;
             inst.radius = r;
             inst.scale = glm::max(g.scale, glm::vec3(1e-4f));
             inst.rot = glm::vec4(g.rot.w, g.rot.x, g.rot.y, g.rot.z);
-            inst.opacity = glm::clamp(g.opacity, 0.0f, 1.0f);
+		inst.opacity = 1.0f / (1.0f + std::exp(-g.opacity));
             _splatInstances.push_back(inst);
 		}
 		return; // indices not used for point/splat cloud
@@ -460,12 +465,6 @@ void Application::createDescriptorPool()
 
 void Application::updateUniformBuffer(uint32_t currentFrame)
 {
-	// only called once
-	static auto startTime = std::chrono::high_resolution_clock::now();
-	// called every frame
-	auto currentTime = std::chrono::high_resolution_clock::now();
-	float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
 	// build camera basis from yaw/pitch
 	glm::vec3 forward(
 		cosf(_camPitch) * cosf(_camYaw),
@@ -483,6 +482,14 @@ void Application::updateUniformBuffer(uint32_t currentFrame)
 	ubo.view = view;
 	ubo.proj = glm::perspective(glm::radians(60.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 100.0f);
 	ubo.proj[1][1] *= -1;
+
+	// Periodically re-sort splats back-to-front (every 5 seconds)
+	static float sortTimer = 0.0f;
+	sortTimer += _deltaTime;
+	if (sortTimer >= 5.0f) {
+		sortAndUploadSplatsPerFrame(view);
+		sortTimer = 0.0f;
+	}
 
     memcpy(_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
 };
@@ -1153,16 +1160,11 @@ void Application::createGraphicsPipeline()
 	// blending
 	VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
 	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-	if (useSplats)
-	{
-		colorBlendAttachment.blendEnable = VK_TRUE;
-		colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-		colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-		colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-		colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-	}
+    if (useSplats)
+    {
+        // Step 1: disable blending to ensure visibility
+        colorBlendAttachment.blendEnable = VK_FALSE;
+    }
 	else
 	{
 		colorBlendAttachment.blendEnable = VK_FALSE;
