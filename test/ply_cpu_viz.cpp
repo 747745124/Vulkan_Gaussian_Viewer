@@ -7,8 +7,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "external/stb_image_write.h"
 
-#include "base/ply_parser.h"
-#include "base/camera.h"
+#include "src/ply_parser.h"
+#include "src/camera.h"
 
 struct Mat4 { float m[16]; };
 

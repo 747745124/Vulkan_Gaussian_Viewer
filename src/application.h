@@ -15,7 +15,7 @@
 #include "utility.hpp"
 #include "swapChainUtils.hpp"
 #include "shaderUtils.hpp"
-#include "vertex.h"
+#include "splat.h"
 #include "camera.h"
 
 #ifdef _WIN32
@@ -90,15 +90,6 @@ private:
 	std::vector<VkDescriptorSet> _descriptorSets;
 	VkDescriptorPool _descriptorPool;
 
-	// Splat (billboard) data for PLY rendering
-	struct SplatInstance { 
-		glm::vec3 center; 
-		glm::vec3 color; 
-		float radius; 
-		glm::vec3 scale; 
-		glm::vec4 rot; 
-		float opacity; 
-	};
 	std::vector<SplatInstance> _splatInstances;
 	uint32_t _splatCount = 0;
 	uint32_t _splatCountPow2 = 0;

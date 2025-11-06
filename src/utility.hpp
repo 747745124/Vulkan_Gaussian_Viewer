@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <limits>
 #include <algorithm>
-#include "external/stb_image.h"
 
 struct QueueFamilyIndices
 {

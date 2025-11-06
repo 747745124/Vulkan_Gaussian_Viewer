@@ -1,7 +1,7 @@
-#include "src/Renderer.hpp"
+#include "src/application.h"
 
 int main() {
-	Renderer app;
+	Application app;
 
 	try {
 		app.run();

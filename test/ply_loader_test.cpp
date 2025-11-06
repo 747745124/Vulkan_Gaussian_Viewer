@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cassert>
 
-#include "base/ply_parser.h"
+#include "src/ply_parser.h"
 
 static void write_ascii_ply(const std::string &path, size_t N)
 {
