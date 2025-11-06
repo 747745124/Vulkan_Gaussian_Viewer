@@ -9,7 +9,7 @@ layout(location = 0) in vec2 inCorner;      // per-vertex (quad), [-1, 1]
 layout(location = 1) in vec3 inCenter;      // per-instance (world space)
 layout(location = 2) in vec3 inColor;       // per-instance
 layout(location = 3) in float inRadius;    // (unused)
-layout(location = 4) in vec3 inScale;       // per-instance (已经 exp'd)
+layout(location = 4) in vec3 inScale;       // per-instance (already exp'd)
 layout(location = 5) in vec4 inQuat;        // per-instance (normalized, (x,y,z,w))
 layout(location = 6) in float inOpacity;   // per-instance
 
@@ -21,17 +21,17 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 void main() {
-    // --- 1. 变换中心点 ---
+    // --- 1. Transform center point ---
     vec4 cam = ubo.view * vec4(inCenter, 1.0);
     vec4 pos2d = ubo.proj * cam;
 
-    // 裁剪 (使用 Shader 2 的安全裁剪)
+    // clipping
     if (pos2d.w <= 0.0) {
         gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
         return;
     }
     
-    // --- 2. 计算 3D 协方差 Vrk ---
+    // --- 2. Calculate 3D covariance Vrk ---
     vec4 q = inQuat;
     float w = q.w, x = q.x, y = q.y, z = q.z;
     mat3 R = mat3(
@@ -49,10 +49,10 @@ void main() {
     mat3 M = R * S;
     mat3 Vrk = M * transpose(M);
 
-    // --- 3. 计算投影 2D 协方差 ---
+    // --- 3. Calculate projected 2D covariance ---
     float fx = abs(ubo.proj[0][0]) * pc.viewport.x * 0.5;
     float fy = abs(ubo.proj[1][1]) * pc.viewport.y * 0.5;
-    float p_z = max(1e-3, -cam.z); // View-space Z (正值)
+    float p_z = max(1e-3, -cam.z); // View-space Z (positive value)
     
     mat3 J = mat3(
         -fx / p_z, 0.0, -(fx * cam.x) / (p_z * p_z),
@@ -64,32 +64,26 @@ void main() {
     mat3 T = transpose(W) * J;
     mat3 cov2d = transpose(T) * Vrk * T;
 
-    // --- 4. 计算 2D 椭圆轴 ---
+    // --- 4. Calculate 2D ellipse axes ---
     float mid = (cov2d[0][0] + cov2d[1][1]) / 2.0;
     float radius = length(vec2((cov2d[0][0] - cov2d[1][1]) / 2.0, cov2d[0][1]));
     float lambda1 = mid + radius;
     float lambda2 = mid - radius;
 
-    // ** 修正 #2: 放宽剔除条件 **
-    // 替换...
-    // if(lambda2 < 0.0) { ... return; }
-    // ...为:
-    lambda2 = max(0.0, lambda2); // 防止负值导致 sqrt(NaN)
+    lambda2 = max(0.0, lambda2); // prevent negative value from causing sqrt(NaN)
 
     vec2 diagonalVector = normalize(vec2(cov2d[0][1], lambda1 - cov2d[0][0]));
     vec2 majorAxis = min(sqrt(2.0 * lambda1), 1024.0) * diagonalVector;
     vec2 minorAxis = min(sqrt(2.0 * lambda2), 1024.0) * vec2(diagonalVector.y, -diagonalVector.x);
 
-    // --- 5. 计算最终位置和颜色 ---
-    
-    // ** 修正 #3: 正确的 Vulkan depth fade **
+    // --- 5. Calculate final position and color ---
     float depthFade = clamp(pos2d.z / pos2d.w + 1.0, 0.0, 1.0);
     
     vColor = vec4(inColor, inOpacity) * depthFade;
     
-    // 传递给 frag shader 的高斯坐标 (范围 [-2, 2])
+    // pass to frag shader Gaussian coordinates (range [-2, 2])
     vPosition = inCorner * 2.0; 
-    vec2 vCenter = pos2d.xy / pos2d.w; // NDC 中心
+    vec2 vCenter = pos2d.xy / pos2d.w; // NDC center
     
     vec2 offset = (vPosition.x * majorAxis + vPosition.y * minorAxis) * 2.0 / pc.viewport;
 

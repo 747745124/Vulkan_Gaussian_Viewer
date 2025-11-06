@@ -11,6 +11,7 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <set>
+
 #include "input.h"
 #include "utility.hpp"
 #include "swapChainUtils.hpp"
@@ -175,10 +176,10 @@ protected:
 	bool _windowReized = false;
 
 	// model loading
-	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/train_hp.ply";
-	const std::string _vertexPath = "/Users/naoyuki/vk_tutorial/shader/splat.vert.spv";
-	const std::string _fragmentPath = "/Users/naoyuki/vk_tutorial/shader/splat.frag.spv";
-	const std::string _computePath = "/Users/naoyuki/vk_tutorial/shader/sort.comp.spv";
+	const std::string _modelPath = "../resource/book.ply";
+	const std::string _vertexPath = "../shader/splat.vert.spv";
+	const std::string _fragmentPath = "../shader/splat.frag.spv";
+	const std::string _computePath = "../shader/sort.comp.spv";
 
 	/* timer for fps */
 	std::chrono::time_point<std::chrono::high_resolution_clock> _lastTimeStamp;

@@ -311,8 +311,8 @@ void Application::handleInput()
 	// Move
 	if (_keyboardInput.keyStates[GLFW_KEY_W] == GLFW_PRESS) move += f;
 	if (_keyboardInput.keyStates[GLFW_KEY_S] == GLFW_PRESS) move -= f;
-	if (_keyboardInput.keyStates[GLFW_KEY_D] == GLFW_PRESS) move += r;
-	if (_keyboardInput.keyStates[GLFW_KEY_A] == GLFW_PRESS) move -= r;
+	if (_keyboardInput.keyStates[GLFW_KEY_D] == GLFW_PRESS) move -= r;
+	if (_keyboardInput.keyStates[GLFW_KEY_A] == GLFW_PRESS) move += r;
 	if (_keyboardInput.keyStates[GLFW_KEY_E] == GLFW_PRESS) move += u;
 	if (_keyboardInput.keyStates[GLFW_KEY_Q] == GLFW_PRESS) move -= u;
 	if (glm::length(move) > 0.0f) _camera->position += glm::normalize(move) * _camSpeed * dt;
@@ -321,8 +321,8 @@ void Application::handleInput()
 	float yaw = 0.0f, pitch = 0.0f;
 	if (_keyboardInput.keyStates[GLFW_KEY_LEFT]  == GLFW_PRESS) yaw   -= _camTurnSpeed * dt;
 	if (_keyboardInput.keyStates[GLFW_KEY_RIGHT] == GLFW_PRESS) yaw   += _camTurnSpeed * dt;
-	if (_keyboardInput.keyStates[GLFW_KEY_UP]    == GLFW_PRESS) pitch += _camTurnSpeed * dt;
-	if (_keyboardInput.keyStates[GLFW_KEY_DOWN]  == GLFW_PRESS) pitch -= _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_UP]    == GLFW_PRESS) pitch -= _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_DOWN]  == GLFW_PRESS) pitch += _camTurnSpeed * dt;
 
 	if (yaw != 0.0f || pitch != 0.0f) {
 		glm::quat pitchQ = glm::angleAxis(pitch, _camera->getRight());
