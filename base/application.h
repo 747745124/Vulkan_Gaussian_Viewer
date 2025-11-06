@@ -78,11 +78,6 @@ private:
 	// CPU pointer to the GPU memory
 	std::vector<void *> _uniformBuffersMapped;
 
-	// SSBO related resources
-	std::vector<VkBuffer> _ssboBuffers;
-	std::vector<VkDeviceMemory> _ssboBuffersMemory;
-	std::vector<void *> _ssboBuffersMapped;
-
 	std::vector<Vertex> _vertices;
 	std::vector<uint32_t> _indices;
 	VkBuffer _vertexBuffer;
@@ -95,16 +90,7 @@ private:
 	std::vector<VkDescriptorSet> _descriptorSets;
 	VkDescriptorPool _descriptorPool;
 
-	// texture related resources
-	VkImage _textureImage;
-	VkDeviceMemory _textureImageMemory;
-	VkImageView _textureImageView;
-	VkSampler _textureSampler;
-
-	// shader storage buffer object
-	std::vector<VkBuffer> _shaderStorageBuffers;
-	std::vector<VkDeviceMemory> _shaderStorageBuffersMemory;
-	std::vector<void *> _shaderStorageBuffersMapped;
+	// (textures and SSBO removed)
 
 	// Splat (billboard) data for PLY rendering
 	struct SplatInstance { 
@@ -130,7 +116,6 @@ private:
 			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
 	}
 
-	void createShaderStorageBuffers();
 	void createInstance();
 	void createSurface();
 	void selectPhysicalDevice(uint32_t deviceIndex = 0);
@@ -143,11 +128,7 @@ private:
 	void createDepthResources();
 
 	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &imageMemory);
-	void createTextureImage(const std::string &texturePath);
-	void createTextureImageView();
-	void createTextureSampler();
 	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
-	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void createSyncObjects();
@@ -192,8 +173,8 @@ protected:
 	bool _windowReized = false;
 
 	// model loading
-	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/train_hp.ply";
-	const std::string _texturePath = "/Users/naoyuki/vk_tutorial/resource/texture.jpg";
+	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/book.ply";
+	// (texture path removed)
 
 	/* timer for fps */
 	std::chrono::time_point<std::chrono::high_resolution_clock> _lastTimeStamp;
