@@ -176,7 +176,7 @@ protected:
 	bool _windowReized = false;
 
 	// model loading
-	const std::string _modelPath = "../resource/book.ply";
+	const std::string _modelPath = "../resource/train.ply";
 	const std::string _vertexPath = "../shader/splat.vert.spv";
 	const std::string _fragmentPath = "../shader/splat.frag.spv";
 	const std::string _computePath = "../shader/sort.comp.spv";

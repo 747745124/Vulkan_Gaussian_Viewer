@@ -48,7 +48,7 @@ void Application::loadModel()
             inst.radius = r;
             inst.scale = glm::max(g.scale, glm::vec3(1e-4f));
             inst.rot = glm::vec4(g.rot.x, g.rot.y, g.rot.z, g.rot.w);
-        inst.opacity = 1.0f / (1.0f + std::exp(-g.opacity));
+        	inst.opacity = 1.0f / (1.0f + std::exp(-g.opacity));
             _splatInstances.push_back(inst);
         }
         _splatCount = static_cast<uint32_t>(_splatInstances.size());
