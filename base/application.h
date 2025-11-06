@@ -16,6 +16,7 @@
 #include "swapChainUtils.hpp"
 #include "shaderUtils.hpp"
 #include "vertex.h"
+#include "camera.h"
 
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -177,21 +178,16 @@ protected:
 	KeyboardInput _keyboardInput;
 	MouseInput _mouseInput;
 
-	// simple camera state
-	glm::vec3 _camPos = glm::vec3(0.0f, 0.0f, 3.0f);
-	float _camYaw = -glm::radians(90.0f); // looking towards -Z by default
-	float _camPitch = 0.0f;
+	std::unique_ptr<PerspectiveCamera> _camera;
 	float _camSpeed = 2.0f; // units per second
 	float _camTurnSpeed = 1.5f; // radians per second
-	float _camRoll = 0.0f; // roll angle in radians (CCW positive)
-	glm::vec3 _camPosPrev = _camPos;
-	float _camYawPrev = _camYaw;
-	float _camPitchPrev = _camPitch;
 
 	/* clear color */
 	glm::vec4 _clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 
 	void updateTime();
+
+	void initializeCamera();
 
 	/* derived class can override this function to handle input */
 	virtual void handleInput();

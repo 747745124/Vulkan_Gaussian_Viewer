@@ -5,6 +5,15 @@
 #include <iostream>
 #include <iomanip>
 
+void Application::initializeCamera()
+{
+
+	_camera = std::make_unique<PerspectiveCamera>(glm::radians(60.0f), _windowWidth / (float)_windowHeight, 0.1f, 100.0f);
+	_camera->position = glm::vec3(0.0f, 0.0f, 3.0f);
+	_camera->rotation = glm::angleAxis(glm::radians(180.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+	_camera->rotation *= glm::angleAxis(glm::radians(180.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+};
+
 void Application::loadModel()
 {
 	auto ends_with = [](const std::string &s, const std::string &suffix){
@@ -51,16 +60,8 @@ void Application::loadModel()
 void Application::createSplatBuffers()
 {
     if (_splatInstances.empty()) return;
-    // One-time back-to-front sort using legacy yaw/pitch/roll camera basis
-    glm::vec3 forward(
-        cosf(_camPitch) * cosf(_camYaw),
-        sinf(_camPitch),
-        cosf(_camPitch) * sinf(_camYaw));
-    forward = glm::normalize(forward);
-    glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-    glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
-    glm::vec3 up = glm::normalize(glm::cross(right, forward));
-    glm::mat4 viewOnce = glm::lookAt(_camPos, _camPos + forward, up);
+	if (_camera) _camera->aspect = _swapChainExtent.width / (float)_swapChainExtent.height;
+	glm::mat4 viewOnce = _camera->getViewMatrix();
     std::stable_sort(_splatInstances.begin(), _splatInstances.end(), [&](const SplatInstance& a, const SplatInstance& b){
         float za = (viewOnce * glm::vec4(a.center, 1.0f)).z;
         float zb = (viewOnce * glm::vec4(b.center, 1.0f)).z;
@@ -285,35 +286,17 @@ void Application::createDescriptorPool()
 
 void Application::updateUniformBuffer(uint32_t currentFrame)
 {
-	// build camera basis from yaw/pitch
-	glm::vec3 forward(
-		cosf(_camPitch) * cosf(_camYaw),
-		sinf(_camPitch),
-		cosf(_camPitch) * sinf(_camYaw));
-	forward = glm::normalize(forward);
-	glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-	glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
-	glm::vec3 up = glm::normalize(glm::cross(right, forward));
-
-	// Apply camera roll around the forward axis
-	glm::mat4 rollM = glm::rotate(glm::mat4(1.0f), _camRoll, forward);
-	glm::mat3 rollR = glm::mat3(rollM);
-	right = rollR * right;
-	up    = rollR * up;
-
-	glm::mat4 view = glm::lookAt(_camPos, _camPos + forward, up);
-
 	MVPMatrix ubo = {};
 	ubo.model = glm::mat4(1.0f);
-	ubo.view = view;
-	ubo.proj = glm::perspective(glm::radians(60.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 100.0f);
+	ubo.view = _camera->getViewMatrix();
+	ubo.proj = _camera->getProjectionMatrix();
 	ubo.proj[1][1] *= -1;
 
 	// Periodically re-sort splats back-to-front (every 5 seconds)
 	static float sortTimer = 0.0f;
 	sortTimer += _deltaTime;
 	if (sortTimer >= 5.0f) {
-		sortAndUploadSplatsPerFrame(view);
+		sortAndUploadSplatsPerFrame(_camera->getViewMatrix());
 		sortTimer = 0.0f;
 	}
 
@@ -347,35 +330,40 @@ void Application::handleInput()
 {
 	const float dt = _deltaTime;
 	glm::vec3 move(0.0f);
+	glm::vec3 f = _camera->getFront();
+	glm::vec3 r = _camera->getRight();
+	glm::vec3 u = _camera->getUp();
 
-	// rebuild forward/right from current yaw/pitch
-	glm::vec3 forward(
-		cosf(_camPitch) * cosf(_camYaw),
-		sinf(_camPitch),
-		cosf(_camPitch) * sinf(_camYaw));
-	forward = glm::normalize(forward);
-	glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-	glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
+	// Move
+	if (_keyboardInput.keyStates[GLFW_KEY_W] == GLFW_PRESS) move += f;
+	if (_keyboardInput.keyStates[GLFW_KEY_S] == GLFW_PRESS) move -= f;
+	if (_keyboardInput.keyStates[GLFW_KEY_D] == GLFW_PRESS) move += r;
+	if (_keyboardInput.keyStates[GLFW_KEY_A] == GLFW_PRESS) move -= r;
+	if (_keyboardInput.keyStates[GLFW_KEY_E] == GLFW_PRESS) move += u;
+	if (_keyboardInput.keyStates[GLFW_KEY_Q] == GLFW_PRESS) move -= u;
+	if (glm::length(move) > 0.0f) _camera->position += glm::normalize(move) * _camSpeed * dt;
 
-	// WASD/EQ movement
-	if (_keyboardInput.keyStates[GLFW_KEY_W] == GLFW_PRESS) move += forward;
-	if (_keyboardInput.keyStates[GLFW_KEY_S] == GLFW_PRESS) move -= forward;
-	if (_keyboardInput.keyStates[GLFW_KEY_D] == GLFW_PRESS) move += right;
-	if (_keyboardInput.keyStates[GLFW_KEY_A] == GLFW_PRESS) move -= right;
-	if (_keyboardInput.keyStates[GLFW_KEY_E] == GLFW_PRESS) move += worldUp;
-	if (_keyboardInput.keyStates[GLFW_KEY_Q] == GLFW_PRESS) move -= worldUp;
-	if (glm::length(move) > 0.0f) _camPos += glm::normalize(move) * _camSpeed * dt;
+	// Rotate: yaw (around world Y) and pitch (around camera right)
+	float yaw = 0.0f, pitch = 0.0f;
+	if (_keyboardInput.keyStates[GLFW_KEY_LEFT]  == GLFW_PRESS) yaw   -= _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_RIGHT] == GLFW_PRESS) yaw   += _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_UP]    == GLFW_PRESS) pitch += _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_DOWN]  == GLFW_PRESS) pitch -= _camTurnSpeed * dt;
 
-	// Arrow keys to adjust yaw/pitch
-	if (_keyboardInput.keyStates[GLFW_KEY_LEFT] == GLFW_PRESS)  _camYaw   -= _camTurnSpeed * dt;
-	if (_keyboardInput.keyStates[GLFW_KEY_RIGHT] == GLFW_PRESS) _camYaw   += _camTurnSpeed * dt;
-	if (_keyboardInput.keyStates[GLFW_KEY_UP] == GLFW_PRESS)    _camPitch += _camTurnSpeed * dt;
-	if (_keyboardInput.keyStates[GLFW_KEY_DOWN] == GLFW_PRESS)  _camPitch -= _camTurnSpeed * dt;
-	_camPitch = glm::clamp(_camPitch, glm::radians(-89.0f), glm::radians(89.0f));
+	if (yaw != 0.0f || pitch != 0.0f) {
+		glm::quat pitchQ = glm::angleAxis(pitch, _camera->getRight());
+		glm::quat yawQ   = glm::angleAxis(yaw,   glm::vec3(0.0f, 1.0f, 0.0f));
+		_camera->rotation = yawQ * pitchQ * _camera->rotation;
+	}
 
-	// Camera roll (CCW/CW) using Z/X keys
-	if (_keyboardInput.keyStates[GLFW_KEY_Z] == GLFW_PRESS) _camRoll += _camTurnSpeed * dt;
-	if (_keyboardInput.keyStates[GLFW_KEY_X] == GLFW_PRESS) _camRoll -= _camTurnSpeed * dt;
+	// Roll: Z/X around camera forward
+	float roll = 0.0f;
+	if (_keyboardInput.keyStates[GLFW_KEY_Z] == GLFW_PRESS) roll += _camTurnSpeed * dt;
+	if (_keyboardInput.keyStates[GLFW_KEY_X] == GLFW_PRESS) roll -= _camTurnSpeed * dt;
+	if (roll != 0.0f) {
+		glm::quat rollQ = glm::angleAxis(roll, _camera->getFront());
+		_camera->rotation = rollQ * _camera->rotation;
+	}
 }
 
 void Application::createUniformBuffers()
@@ -1282,6 +1270,7 @@ Application::Application()
 	createFramebuffers();
 
     loadModel();
+	initializeCamera();
 	createSplatBuffers();
 	createUniformBuffers();
 
