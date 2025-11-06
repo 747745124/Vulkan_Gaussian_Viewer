@@ -122,8 +122,6 @@ void Application::createDepthResources()
 	transitionImageLayout(_depthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 }
 
-// (texture helpers removed)
-
 void Application::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
 {
 	VkCommandBuffer commandBuffer = Utils::beginSingleTimeCommands(_device, _commandPool);
@@ -233,8 +231,6 @@ void Application::createImage(uint32_t width, uint32_t height, VkFormat format, 
 
 	vkBindImageMemory(_device, image, imageMemory, 0);
 }
-
-// (createTextureImage removed)
 
 void Application::createDescriptorSets()
 {
@@ -383,7 +379,6 @@ void Application::createDescriptorSetLayout()
 	return;
 }
 
-// (createIndexBuffer removed)
 // this is a temporary one-time command buffer
 void Application::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
 {
@@ -468,7 +463,7 @@ void Application::createComputeDescriptorSetLayout()
 
 void Application::createComputePipeline()
 {
-	auto compCode = shaderUtils::readFile("/Users/naoyuki/vk_tutorial/shader/sort.comp.spv");
+	auto compCode = shaderUtils::readFile(_computePath);
 	VkShaderModule compModule = shaderUtils::createShaderModule(_device, compCode);
 
 	VkPipelineShaderStageCreateInfo stage{};
@@ -632,9 +627,6 @@ void Application::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMe
 	vkBindBufferMemory(_device, buffer, bufferMemory, 0);
 }
 
-// create a triangle vertex buffer
-// (createVertexBuffer removed)
-
 void Application::cleanupSwapChain()
 {
 	vkDestroyImageView(_device, _depthImageView, nullptr);
@@ -700,23 +692,6 @@ void Application::renderFrame()
 	// wait for previous frame to finish
 	vkWaitForFences(_device, 1, &_inFlightFences[_currentFrame], VK_TRUE, UINT64_MAX);
 	vkResetFences(_device, 1, &_inFlightFences[_currentFrame]);
-
-	// Read GPU validation result from previous frame (host-visible buffer)
-	if (_sortValidationMapped) {
-		uint32_t valid = *_sortValidationMapped;
-		static int counter = 0;
-		if (valid == 0u && (counter++ % 60 == 0)) {
-			std::cout << "[GPU Sort] Validation FAILED: order not monotonic (near-to-far)." << std::endl;
-			if (_sortDebugMapped && _sortDebugMapped[0] == 1u) {
-				uint32_t i = _sortDebugMapped[1];
-				uint32_t idxA = _sortDebugMapped[2];
-				uint32_t idxB = _sortDebugMapped[3];
-				float depthA = *reinterpret_cast<float*>(&_sortDebugMapped[4]);
-				float depthB = *reinterpret_cast<float*>(&_sortDebugMapped[5]);
-				printf("  Fail at sorted[%u]: depth(idx %u)=%f vs sorted[%u]: depth(idx %u)=%f\n", i, idxA, depthA, i + 1, idxB, depthB);
-			}
-		}
-	}
 
 	// acquire an image from the swap chain
 	uint32_t imageIndex;
@@ -1504,8 +1479,6 @@ Application::~Application()
 
 	cleanupSwapChain();
 
-    // (triangle buffers cleanup removed)
-
 	if (_splatVertexBuffer != VK_NULL_HANDLE)
 	{
 		vkDestroyBuffer(_device, _splatVertexBuffer, nullptr);
@@ -1537,22 +1510,6 @@ Application::~Application()
 	if (_sortIndexBufferMemory != VK_NULL_HANDLE)
 	{
 		vkFreeMemory(_device, _sortIndexBufferMemory, nullptr);
-	}
-	if (_sortValidationBuffer != VK_NULL_HANDLE)
-	{
-		vkDestroyBuffer(_device, _sortValidationBuffer, nullptr);
-	}
-	if (_sortValidationBufferMemory != VK_NULL_HANDLE)
-	{
-		vkFreeMemory(_device, _sortValidationBufferMemory, nullptr);
-	}
-	if (_sortDebugBuffer != VK_NULL_HANDLE)
-	{
-		vkDestroyBuffer(_device, _sortDebugBuffer, nullptr);
-	}
-	if (_sortDebugBufferMemory != VK_NULL_HANDLE)
-	{
-		vkFreeMemory(_device, _sortDebugBufferMemory, nullptr);
 	}
 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)

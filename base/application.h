@@ -86,13 +86,9 @@ private:
 	// CPU pointer to the GPU memory
 	std::vector<void *> _uniformBuffersMapped;
 
-    // (triangle mesh buffers removed)
-
 	VkDescriptorSetLayout _descriptorSetLayout;
 	std::vector<VkDescriptorSet> _descriptorSets;
 	VkDescriptorPool _descriptorPool;
-
-	// (textures and SSBO removed)
 
 	// Splat (billboard) data for PLY rendering
 	struct SplatInstance { 
@@ -146,7 +142,7 @@ private:
 	void cleanupSwapChain();
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	void recreateSwapChain();
-    // (triangle mesh buffer creators removed)
+
 	void createSplatBuffers();
 	void createSortBuffers();
 	// note that uniform buffers usually vary for each frame
@@ -188,9 +184,10 @@ protected:
 	bool _windowReized = false;
 
 	// model loading
-	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/book.ply";
+	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/train_hp.ply";
 	const std::string _vertexPath = "/Users/naoyuki/vk_tutorial/shader/splat.vert.spv";
 	const std::string _fragmentPath = "/Users/naoyuki/vk_tutorial/shader/splat.frag.spv";
+	const std::string _computePath = "/Users/naoyuki/vk_tutorial/shader/sort.comp.spv";
 
 	/* timer for fps */
 	std::chrono::time_point<std::chrono::high_resolution_clock> _lastTimeStamp;
