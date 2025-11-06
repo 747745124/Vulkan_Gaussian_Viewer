@@ -140,7 +140,6 @@ private:
 	void createDescriptorSets();
 	void updateUniformBuffer(uint32_t currentFrame);
     void sortAndUploadSplatsPerFrame(const glm::mat4& view);
-	void debugComputeAnisoCPU(size_t count = 8);
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 	void printInstanceExtensionSupport();
@@ -167,7 +166,8 @@ protected:
 
 	// model loading
 	const std::string _modelPath = "/Users/naoyuki/vk_tutorial/resource/book.ply";
-	// (texture path removed)
+	const std::string _vertexPath = "/Users/naoyuki/vk_tutorial/shader/splat.vert.spv";
+	const std::string _fragmentPath = "/Users/naoyuki/vk_tutorial/shader/splat.frag.spv";
 
 	/* timer for fps */
 	std::chrono::time_point<std::chrono::high_resolution_clock> _lastTimeStamp;
