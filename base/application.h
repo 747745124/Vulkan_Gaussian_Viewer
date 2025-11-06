@@ -65,6 +65,13 @@ private:
 	VkCommandPool _commandPool;
 	std::vector<VkFramebuffer> _swapChainFramebuffers;
 
+	// Compute (GPU sorting) resources
+	VkPipeline _computePipeline = VK_NULL_HANDLE;
+	VkPipelineLayout _computePipelineLayout = VK_NULL_HANDLE;
+	VkDescriptorSetLayout _computeDescriptorSetLayout = VK_NULL_HANDLE;
+	VkDescriptorPool _computeDescriptorPool = VK_NULL_HANDLE;
+	VkDescriptorSet _computeDescriptorSet = VK_NULL_HANDLE;
+
 	const uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 	uint32_t _currentFrame = 0;
 	std::vector<VkCommandBuffer> _commandBuffers;
@@ -97,13 +104,21 @@ private:
 		float opacity; 
 	};
 	std::vector<SplatInstance> _splatInstances;
+	uint32_t _splatCount = 0;
+	uint32_t _splatCountPow2 = 0;
 	VkBuffer _splatVertexBuffer = VK_NULL_HANDLE; // quad corners (vec2)
 	VkDeviceMemory _splatVertexBufferMemory = VK_NULL_HANDLE;
 	VkBuffer _splatInstanceBuffer = VK_NULL_HANDLE; // per-instance data
 	VkDeviceMemory _splatInstanceBufferMemory = VK_NULL_HANDLE;
-
-	void findDepthFormat()
-	{
+	// Sorted instance buffer (output of compute pass)
+	VkBuffer _splatInstanceBufferSorted = VK_NULL_HANDLE;
+	VkDeviceMemory _splatInstanceBufferSortedMemory = VK_NULL_HANDLE;
+	// Index buffer used during GPU sort (mapping of instance order)
+	VkBuffer _sortIndexBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory _sortIndexBufferMemory = VK_NULL_HANDLE;
+ 
+ 	void findDepthFormat()
+ 	{
 		Utils::findSupportedFormat(
 			_physicalDevice,
 			{VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
@@ -133,6 +148,7 @@ private:
 	void recreateSwapChain();
     // (triangle mesh buffer creators removed)
 	void createSplatBuffers();
+	void createSortBuffers();
 	// note that uniform buffers usually vary for each frame
 	void createUniformBuffers();
 	void createCommandBuffer();
@@ -140,7 +156,13 @@ private:
 	void createDescriptorSetLayout();
 	void createDescriptorSets();
 	void updateUniformBuffer(uint32_t currentFrame);
-    void sortAndUploadSplatsPerFrame(const glm::mat4& view);
+
+	// Compute (GPU sorting) setup
+	void createComputeDescriptorSetLayout();
+	void createComputePipeline();
+	void createComputeDescriptorPool();
+	void createComputeDescriptorSets();
+	void recordComputeSort(VkCommandBuffer commandBuffer);
 
 	bool checkValidationLayerSupport(const std::vector<const char *> &validationLayers);
 	void printInstanceExtensionSupport();

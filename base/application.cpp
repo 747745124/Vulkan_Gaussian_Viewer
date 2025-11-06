@@ -51,6 +51,16 @@ void Application::loadModel()
         inst.opacity = 1.0f / (1.0f + std::exp(-g.opacity));
             _splatInstances.push_back(inst);
         }
+        _splatCount = static_cast<uint32_t>(_splatInstances.size());
+        auto nextPow2 = [](uint32_t v) {
+            if (v <= 1u) return 1u;
+            v--;
+            v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v |= v >> 16;
+            v++;
+            return v;
+        };
+        _splatCountPow2 = nextPow2(_splatCount);
+
         return; // indices not used for point/splat cloud
     }
 
@@ -96,7 +106,7 @@ void Application::createSplatBuffers()
 		vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
 		memcpy(data, _splatInstances.data(), bufferSize);
 		vkUnmapMemory(_device, stagingBufferMemory);
-		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _splatInstanceBuffer, _splatInstanceBufferMemory);
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _splatInstanceBuffer, _splatInstanceBufferMemory);
 		copyBuffer(stagingBuffer, _splatInstanceBuffer, bufferSize);
 		vkDestroyBuffer(_device, stagingBuffer, nullptr);
 		vkFreeMemory(_device, stagingBufferMemory, nullptr);
@@ -291,40 +301,8 @@ void Application::updateUniformBuffer(uint32_t currentFrame)
 	ubo.view = _camera->getViewMatrix();
 	ubo.proj = _camera->getProjectionMatrix();
 	ubo.proj[1][1] *= -1;
-
-	// Periodically re-sort splats back-to-front (every 5 seconds)
-	static float sortTimer = 0.0f;
-	sortTimer += _deltaTime;
-	if (sortTimer >= 5.0f) {
-		sortAndUploadSplatsPerFrame(_camera->getViewMatrix());
-		sortTimer = 0.0f;
-	}
-
     memcpy(_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
 };
-
-void Application::sortAndUploadSplatsPerFrame(const glm::mat4& view)
-{
-	if (_splatInstances.empty()) return;
-	// sort back-to-front (more negative z first)
-	std::stable_sort(_splatInstances.begin(), _splatInstances.end(), [&](const SplatInstance& a, const SplatInstance& b){
-		float za = (view * glm::vec4(a.center, 1.0f)).z;
-		float zb = (view * glm::vec4(b.center, 1.0f)).z;
-		return za > zb;
-	});
-	// upload via staging to existing device-local buffer
-	VkDeviceSize bufferSize = sizeof(SplatInstance) * _splatInstances.size();
-	VkBuffer stagingBuffer = VK_NULL_HANDLE;
-	VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingMemory);
-	void* data = nullptr;
-	vkMapMemory(_device, stagingMemory, 0, bufferSize, 0, &data);
-	memcpy(data, _splatInstances.data(), bufferSize);
-	vkUnmapMemory(_device, stagingMemory);
-	copyBuffer(stagingBuffer, _splatInstanceBuffer, bufferSize);
-	vkDestroyBuffer(_device, stagingBuffer, nullptr);
-	vkFreeMemory(_device, stagingMemory, nullptr);
-}
 
 void Application::handleInput()
 {
@@ -418,6 +396,211 @@ void Application::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSiz
 	vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
 	Utils::endSingleTimeCommands(_device, _commandPool, _graphicsQueue, commandBuffer);
+}
+
+void Application::createSortBuffers()
+{
+	if (_splatInstances.empty()) return;
+	VkDeviceSize instanceBufferSize = sizeof(SplatInstance) * _splatInstances.size();
+
+	// Create the output (sorted) instance buffer
+	createBuffer(
+		instanceBufferSize,
+		VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		_splatInstanceBufferSorted,
+		_splatInstanceBufferSortedMemory);
+
+	// Create the indices buffer used during GPU sort (0..N-1)
+	VkDeviceSize idxBufferSize = sizeof(uint32_t) * _splatCountPow2;
+	createBuffer(
+		idxBufferSize,
+		VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		_sortIndexBuffer,
+		_sortIndexBufferMemory);
+
+	// Initialize indices via staging (0..N-1)
+	VkBuffer stagingBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+	createBuffer(idxBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingMemory);
+	uint32_t* mapped = nullptr;
+	vkMapMemory(_device, stagingMemory, 0, idxBufferSize, 0, reinterpret_cast<void**>(&mapped));
+	for (uint32_t i = 0; i < _splatCountPow2; ++i) mapped[i] = i;
+	vkUnmapMemory(_device, stagingMemory);
+	copyBuffer(stagingBuffer, _sortIndexBuffer, idxBufferSize);
+	vkDestroyBuffer(_device, stagingBuffer, nullptr);
+	vkFreeMemory(_device, stagingMemory, nullptr);
+}
+
+void Application::createComputeDescriptorSetLayout()
+{
+	VkDescriptorSetLayoutBinding inData{};
+	inData.binding = 0;
+	inData.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	inData.descriptorCount = 1;
+	inData.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	VkDescriptorSetLayoutBinding outData{};
+	outData.binding = 1;
+	outData.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	outData.descriptorCount = 1;
+	outData.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	VkDescriptorSetLayoutBinding indices{};
+	indices.binding = 2;
+	indices.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	indices.descriptorCount = 1;
+	indices.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	std::array<VkDescriptorSetLayoutBinding, 3> bindings{ inData, outData, indices };
+
+	VkDescriptorSetLayoutCreateInfo info{};
+	info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	info.bindingCount = static_cast<uint32_t>(bindings.size());
+	info.pBindings = bindings.data();
+
+	if (vkCreateDescriptorSetLayout(_device, &info, nullptr, &_computeDescriptorSetLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create compute descriptor set layout!");
+	}
+}
+
+void Application::createComputePipeline()
+{
+	auto compCode = shaderUtils::readFile("/Users/naoyuki/vk_tutorial/shader/sort.comp.spv");
+	VkShaderModule compModule = shaderUtils::createShaderModule(_device, compCode);
+
+	VkPipelineShaderStageCreateInfo stage{};
+	stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	stage.module = compModule;
+	stage.pName = "main";
+
+	struct SortPC { glm::mat4 view; uint32_t N; uint32_t strideU32; uint32_t centerOffsetU32; uint32_t mode; uint32_t j; uint32_t k; uint32_t pow2N; };
+	VkPushConstantRange pcRange{};
+	pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	pcRange.offset = 0;
+	pcRange.size = sizeof(SortPC);
+
+	VkPipelineLayoutCreateInfo pl{};
+	pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pl.setLayoutCount = 1;
+	pl.pSetLayouts = &_computeDescriptorSetLayout;
+	pl.pushConstantRangeCount = 1;
+	pl.pPushConstantRanges = &pcRange;
+
+	if (vkCreatePipelineLayout(_device, &pl, nullptr, &_computePipelineLayout) != VK_SUCCESS)
+	{
+		vkDestroyShaderModule(_device, compModule, nullptr);
+		throw std::runtime_error("failed to create compute pipeline layout!");
+	}
+
+	VkComputePipelineCreateInfo ci{};
+	ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	ci.stage = stage;
+	ci.layout = _computePipelineLayout;
+
+	if (vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &ci, nullptr, &_computePipeline) != VK_SUCCESS)
+	{
+		vkDestroyShaderModule(_device, compModule, nullptr);
+		throw std::runtime_error("failed to create compute pipeline!");
+	}
+
+	vkDestroyShaderModule(_device, compModule, nullptr);
+}
+
+void Application::createComputeDescriptorPool()
+{
+	VkDescriptorPoolSize pool{};
+	pool.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	pool.descriptorCount = 3;
+
+	VkDescriptorPoolCreateInfo info{};
+	info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	info.poolSizeCount = 1;
+	info.pPoolSizes = &pool;
+	info.maxSets = 1;
+
+	if (vkCreateDescriptorPool(_device, &info, nullptr, &_computeDescriptorPool) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create compute descriptor pool!");
+	}
+}
+
+void Application::createComputeDescriptorSets()
+{
+	VkDescriptorSetAllocateInfo alloc{};
+	alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	alloc.descriptorPool = _computeDescriptorPool;
+	alloc.descriptorSetCount = 1;
+	alloc.pSetLayouts = &_computeDescriptorSetLayout;
+
+	if (vkAllocateDescriptorSets(_device, &alloc, &_computeDescriptorSet) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate compute descriptor set!");
+	}
+
+	VkDescriptorBufferInfo inInfo{}; inInfo.buffer = _splatInstanceBuffer; inInfo.offset = 0; inInfo.range = VK_WHOLE_SIZE;
+	VkDescriptorBufferInfo outInfo{}; outInfo.buffer = _splatInstanceBufferSorted; outInfo.offset = 0; outInfo.range = VK_WHOLE_SIZE;
+	VkDescriptorBufferInfo idxInfo{}; idxInfo.buffer = _sortIndexBuffer; idxInfo.offset = 0; idxInfo.range = VK_WHOLE_SIZE;
+
+	VkWriteDescriptorSet writes[3] = {};
+	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[0].dstSet = _computeDescriptorSet; writes[0].dstBinding = 0; writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; writes[0].descriptorCount = 1; writes[0].pBufferInfo = &inInfo;
+	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].dstSet = _computeDescriptorSet; writes[1].dstBinding = 1; writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; writes[1].descriptorCount = 1; writes[1].pBufferInfo = &outInfo;
+	writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[2].dstSet = _computeDescriptorSet; writes[2].dstBinding = 2; writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; writes[2].descriptorCount = 1; writes[2].pBufferInfo = &idxInfo;
+
+	vkUpdateDescriptorSets(_device, 3, writes, 0, nullptr);
+}
+
+void Application::recordComputeSort(VkCommandBuffer commandBuffer)
+{
+	if (_computePipeline == VK_NULL_HANDLE || _splatInstances.empty()) return;
+
+    const uint32_t LOCAL_SIZE_X = 256u;
+    const uint32_t groupCountN = (_splatCount + LOCAL_SIZE_X - 1u) / LOCAL_SIZE_X;
+    const uint32_t groupCountPow2 = (_splatCountPow2 + LOCAL_SIZE_X - 1u) / LOCAL_SIZE_X;
+
+    struct SortPC { glm::mat4 view; uint32_t N; uint32_t strideU32; uint32_t centerOffsetU32; uint32_t mode; uint32_t j; uint32_t k; uint32_t pow2N; } pc{};
+    pc.view = _camera->getViewMatrix();
+    pc.N = _splatCount;
+    pc.pow2N = _splatCountPow2;
+    pc.strideU32 = static_cast<uint32_t>(sizeof(SplatInstance) / 4);
+    pc.centerOffsetU32 = static_cast<uint32_t>(offsetof(SplatInstance, center) / 4);
+    pc.j = 0u; pc.k = 0u;
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipeline);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 0, 1, &_computeDescriptorSet, 0, nullptr);
+
+    // Initialize indices
+    pc.mode = 0u;
+    vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+    vkCmdDispatch(commandBuffer, groupCountN, 1, 1);
+
+    VkMemoryBarrier mbar{}; mbar.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER; mbar.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT; mbar.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mbar, 0, nullptr, 0, nullptr);
+
+    // Bitonic sort passes (near-to-far: descending by view-space Z)
+    for (uint32_t k = 2u; k <= _splatCountPow2; k <<= 1u) {
+        pc.k = k;
+        for (uint32_t j = k >> 1u; j > 0u; j >>= 1u) {
+            pc.mode = 1u;
+            pc.j = j;
+            vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+            vkCmdDispatch(commandBuffer, groupCountPow2, 1, 1);
+
+            // Barrier between passes
+            vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mbar, 0, nullptr, 0, nullptr);
+        }
+    }
+
+    // Reorder: copy input -> output according to sorted indices
+    pc.mode = 2u;
+    vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+    vkCmdDispatch(commandBuffer, groupCountN, 1, 1);
+
+    VkMemoryBarrier toGraphics{}; toGraphics.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER; toGraphics.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT; toGraphics.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 1, &toGraphics, 0, nullptr, 0, nullptr);
 }
 
 void Application::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &bufferMemory)
@@ -517,6 +700,23 @@ void Application::renderFrame()
 	// wait for previous frame to finish
 	vkWaitForFences(_device, 1, &_inFlightFences[_currentFrame], VK_TRUE, UINT64_MAX);
 	vkResetFences(_device, 1, &_inFlightFences[_currentFrame]);
+
+	// Read GPU validation result from previous frame (host-visible buffer)
+	if (_sortValidationMapped) {
+		uint32_t valid = *_sortValidationMapped;
+		static int counter = 0;
+		if (valid == 0u && (counter++ % 60 == 0)) {
+			std::cout << "[GPU Sort] Validation FAILED: order not monotonic (near-to-far)." << std::endl;
+			if (_sortDebugMapped && _sortDebugMapped[0] == 1u) {
+				uint32_t i = _sortDebugMapped[1];
+				uint32_t idxA = _sortDebugMapped[2];
+				uint32_t idxB = _sortDebugMapped[3];
+				float depthA = *reinterpret_cast<float*>(&_sortDebugMapped[4]);
+				float depthB = *reinterpret_cast<float*>(&_sortDebugMapped[5]);
+				printf("  Fail at sorted[%u]: depth(idx %u)=%f vs sorted[%u]: depth(idx %u)=%f\n", i, idxA, depthA, i + 1, idxB, depthB);
+			}
+		}
+	}
 
 	// acquire an image from the swap chain
 	uint32_t imageIndex;
@@ -631,6 +831,9 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 		throw std::runtime_error("failed to begin recording command buffer!");
 	}
 
+	// Run GPU sorting compute pass (copy unsorted -> sorted for now)
+	recordComputeSort(commandBuffer);
+
 	VkRenderPassBeginInfo renderPassBeginInfo = {};
 	renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	renderPassBeginInfo.renderPass = _renderPass;
@@ -664,7 +867,7 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[_currentFrame], 0, nullptr);
 
     // Splat-only draw
-    VkBuffer bufs[] = { _splatVertexBuffer, _splatInstanceBuffer };
+	VkBuffer bufs[] = { _splatVertexBuffer, _splatInstanceBufferSorted != VK_NULL_HANDLE ? _splatInstanceBufferSorted : _splatInstanceBuffer };
     VkDeviceSize offs[] = { 0, 0 };
     vkCmdBindVertexBuffers(commandBuffer, 0, 2, bufs, offs);
     struct { float w, h; } pc = { (float)_swapChainExtent.width, (float)_swapChainExtent.height };
@@ -1272,6 +1475,12 @@ Application::Application()
     loadModel();
 	initializeCamera();
 	createSplatBuffers();
+	// GPU sorting (compute) setup
+	createSortBuffers();
+	createComputeDescriptorSetLayout();
+	createComputePipeline();
+	createComputeDescriptorPool();
+	createComputeDescriptorSets();
 	createUniformBuffers();
 
 	createDescriptorPool();
@@ -1312,6 +1521,38 @@ Application::~Application()
 	if (_splatInstanceBufferMemory != VK_NULL_HANDLE)
 	{
 		vkFreeMemory(_device, _splatInstanceBufferMemory, nullptr);
+	}
+	if (_splatInstanceBufferSorted != VK_NULL_HANDLE)
+	{
+		vkDestroyBuffer(_device, _splatInstanceBufferSorted, nullptr);
+	}
+	if (_splatInstanceBufferSortedMemory != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(_device, _splatInstanceBufferSortedMemory, nullptr);
+	}
+	if (_sortIndexBuffer != VK_NULL_HANDLE)
+	{
+		vkDestroyBuffer(_device, _sortIndexBuffer, nullptr);
+	}
+	if (_sortIndexBufferMemory != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(_device, _sortIndexBufferMemory, nullptr);
+	}
+	if (_sortValidationBuffer != VK_NULL_HANDLE)
+	{
+		vkDestroyBuffer(_device, _sortValidationBuffer, nullptr);
+	}
+	if (_sortValidationBufferMemory != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(_device, _sortValidationBufferMemory, nullptr);
+	}
+	if (_sortDebugBuffer != VK_NULL_HANDLE)
+	{
+		vkDestroyBuffer(_device, _sortDebugBuffer, nullptr);
+	}
+	if (_sortDebugBufferMemory != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(_device, _sortDebugBufferMemory, nullptr);
 	}
 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
@@ -1356,6 +1597,23 @@ Application::~Application()
 	if (_descriptorSetLayout != VK_NULL_HANDLE)
 	{
 		vkDestroyDescriptorSetLayout(_device, _descriptorSetLayout, nullptr);
+	}
+
+	if (_computeDescriptorPool != VK_NULL_HANDLE)
+	{
+		vkDestroyDescriptorPool(_device, _computeDescriptorPool, nullptr);
+	}
+	if (_computePipeline != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(_device, _computePipeline, nullptr);
+	}
+	if (_computePipelineLayout != VK_NULL_HANDLE)
+	{
+		vkDestroyPipelineLayout(_device, _computePipelineLayout, nullptr);
+	}
+	if (_computeDescriptorSetLayout != VK_NULL_HANDLE)
+	{
+		vkDestroyDescriptorSetLayout(_device, _computeDescriptorSetLayout, nullptr);
 	}
 
 	if (_graphicsPipeline != VK_NULL_HANDLE)

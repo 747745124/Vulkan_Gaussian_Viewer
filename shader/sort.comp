@@ -1,0 +1,84 @@
+#version 450
+
+// GPU sorting
+// mode 0: init indices[i] = i
+// mode 1: bitonic compare-swap step (j, k)
+// mode 2: reorder (copy) inData -> outData according to indices
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) readonly buffer InData { uint inData[]; };
+layout(std430, binding = 1) writeonly buffer OutData { uint outData[]; };
+layout(std430, binding = 2) buffer Indices { uint indices[]; };
+
+layout(push_constant) uniform Params {
+    mat4 view;              // not used yet in copy path
+    uint N;
+    uint strideU32;         // sizeof(SplatInstance)/4
+    uint centerOffsetU32;   // offsetof(SplatInstance, center)/4
+    uint mode; // 0=init, 1=sort step, 2=reorder
+    uint j;                 // reserved
+    uint k;                 // reserved
+    uint pow2N;
+} pc;
+
+vec3 loadCenter(uint idx) {
+    uint base = idx * pc.strideU32 + pc.centerOffsetU32;
+    float x = uintBitsToFloat(inData[base + 0u]);
+    float y = uintBitsToFloat(inData[base + 1u]);
+    float z = uintBitsToFloat(inData[base + 2u]);
+    return vec3(x, y, z);
+}
+
+float depthOf(uint idx) {
+    if (idx >= pc.N) {
+        return -1.0e38; // negative infinity for descending sort
+    }
+    vec3 c = loadCenter(idx);
+    return (pc.view * vec4(c, 1.0)).z;
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (pc.mode == 1u) {
+        if (i >= pc.pow2N) return;
+        uint partner = i ^ pc.j;
+        // Avoid double work
+        if (partner > i) {
+            uint ia = indices[i];
+            uint ib = indices[partner];
+            float a = depthOf(ia);
+            float b = depthOf(ib);
+
+            // Near-to-far: descending by view-space Z (larger Z first)
+            bool ascending = ((i & pc.k) != 0u);
+            bool swapNeeded = (ascending ? (a > b) : (a < b));
+            if (swapNeeded) {
+                uint tmp = indices[i];
+                indices[i] = indices[partner];
+                indices[partner] = tmp;
+            }
+        }
+        return;
+    }
+
+    if (i >= pc.N) return;
+
+    if (pc.mode == 0u) {
+        // indices buffer is pow2N, but we only init up to N, others are unused
+        indices[i] = i;
+        return;
+    }
+
+    if (pc.mode == 2u) {
+        uint srcIdx = indices[i];
+        uint dstBase = i * pc.strideU32;
+        uint srcBase = srcIdx * pc.strideU32;
+        for (uint o = 0u; o < pc.strideU32; ++o) {
+            outData[dstBase + o] = inData[srcBase + o];
+        }
+        return;
+    }
+}
+
+
