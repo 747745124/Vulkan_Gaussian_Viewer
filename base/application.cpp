@@ -4,8 +4,7 @@
 #include <cmath>
 #include <iostream>
 #include <iomanip>
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "external/tiny_obj_loader.h"
+// (tinyobj removed - triangle mesh path deleted)
 
 // (SSBO removed)
 
@@ -15,97 +14,41 @@ void Application::loadModel()
 		return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 	};
 
-	_vertices.clear();
-	_indices.clear();
 	_splatInstances.clear();
 
     if (ends_with(_modelPath, ".ply"))
-	{
-		// Load PLY points using our parser
-		std::vector<Gaussian> gs;
-		ParseOptions opts;
+    {
+        // Load PLY points using our parser
+        std::vector<Gaussian> gs;
+        ParseOptions opts;
 
         opts.scaleSpace = ScaleSpace::Log;
         opts.rotationOrder = RotationOrder::WXYZ;
-		if (!parse_ply(_modelPath, gs, opts))
-		{
-			throw std::runtime_error("Failed to load PLY: " + _modelPath);
-		}
-		_vertices.reserve(gs.size());
-		_splatInstances.reserve(gs.size());
-		for (const auto &g : gs)
-		{
-			Vertex v{};
-			v.position = g.position;
-			v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
-			v.texCoord = glm::vec2(0.0f);
-		const float SH_C0 = 0.28209479177387814f;
-		glm::vec3 baseColor = glm::vec3(0.25f) + SH_C0 * g.f_dc_0;
-		v.color = baseColor;
-			_vertices.push_back(v);
+        if (!parse_ply(_modelPath, gs, opts))
+        {
+            throw std::runtime_error("Failed to load PLY: " + _modelPath);
+        }
+        _splatInstances.reserve(gs.size());
+        for (const auto &g : gs)
+        {
+        const float SH_C0 = 0.28209479177387814f;
+        glm::vec3 baseColor = glm::vec3(0.25f) + SH_C0 * g.f_dc_0;
 
             SplatInstance inst{};
             inst.center = g.position;
-		inst.color = baseColor;
+            inst.color = baseColor;
             float r = g.scale.x;
             if (!std::isfinite(r) || r <= 0.0f) r = 0.01f;
             inst.radius = r;
             inst.scale = glm::max(g.scale, glm::vec3(1e-4f));
             inst.rot = glm::vec4(g.rot.x, g.rot.y, g.rot.z, g.rot.w);
-		inst.opacity = 1.0f / (1.0f + std::exp(-g.opacity));
+        inst.opacity = 1.0f / (1.0f + std::exp(-g.opacity));
             _splatInstances.push_back(inst);
-		}
-		return; // indices not used for point/splat cloud
-	}
+        }
+        return; // indices not used for point/splat cloud
+    }
 
-	tinyobj::attrib_t attrib;
-	std::vector<tinyobj::shape_t> shapes;
-	std::vector<tinyobj::material_t> materials;
-	std::string warn, err;
-
-	if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, _modelPath.c_str()))
-	{
-		throw std::runtime_error(warn + err);
-	}
-
-	std::unordered_map<Vertex, uint32_t> uniqueVertices{};
-
-	for (const auto &shape : shapes)
-	{
-		for (const auto &index : shape.mesh.indices)
-		{
-			Vertex vertex = {};
-			vertex.position = {
-				attrib.vertices[3 * index.vertex_index + 0],
-				attrib.vertices[3 * index.vertex_index + 1],
-				attrib.vertices[3 * index.vertex_index + 2]};
-
-			if (index.normal_index >= 0)
-			{
-				vertex.normal = {
-					attrib.normals[3 * index.normal_index + 0],
-					attrib.normals[3 * index.normal_index + 1],
-					attrib.normals[3 * index.normal_index + 2]};
-			}
-
-			if (index.texcoord_index >= 0)
-			{
-				vertex.texCoord = {
-					attrib.texcoords[2 * index.texcoord_index + 0],
-					1.0f - attrib.texcoords[2 * index.texcoord_index + 1]};
-			}
-
-			vertex.color = {1.0f, 1.0f, 1.0f};
-
-			if (uniqueVertices.count(vertex) == 0)
-			{
-				uniqueVertices[vertex] = static_cast<uint32_t>(_vertices.size());
-				_vertices.push_back(vertex);
-			}
-
-			_indices.push_back(uniqueVertices[vertex]);
-		}
-	}
+    throw std::runtime_error("Only PLY splat files are supported in this build");
 }
 
 void Application::createSplatBuffers()
@@ -305,7 +248,7 @@ void Application::createDescriptorSets()
 		VkDescriptorBufferInfo bufferInfo = {};
 		bufferInfo.buffer = _uniformBuffers[i];
 		bufferInfo.offset = 0;
-		bufferInfo.range = sizeof(UniformBufferObject);
+		bufferInfo.range = sizeof(MVPMatrix);
 
 		VkWriteDescriptorSet descriptorWrite = {};
 		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -363,7 +306,7 @@ void Application::updateUniformBuffer(uint32_t currentFrame)
 
 	glm::mat4 view = glm::lookAt(_camPos, _camPos + forward, up);
 
-	UniformBufferObject ubo = {};
+	MVPMatrix ubo = {};
 	ubo.model = glm::mat4(1.0f);
 	ubo.view = view;
 	ubo.proj = glm::perspective(glm::radians(60.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 100.0f);
@@ -557,7 +500,7 @@ void Application::debugComputeAnisoCPU(size_t count)
 
 void Application::createUniformBuffers()
 {
-	VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+	VkDeviceSize bufferSize = sizeof(MVPMatrix);
 	_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 	_uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
 	_uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
@@ -594,30 +537,7 @@ void Application::createDescriptorSetLayout()
 	return;
 }
 
-void Application::createIndexBuffer()
-{
-	if (_indices.empty())
-	{
-		_indexBuffer = VK_NULL_HANDLE;
-		_indexBufferMemory = VK_NULL_HANDLE;
-		return;
-	}
-	VkDeviceSize bufferSize = sizeof(_indices[0]) * _indices.size();
-	VkBuffer stagingBuffer;
-	VkDeviceMemory stagingBufferMemory;
-	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-	void *data;
-	vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
-	memcpy(data, _indices.data(), bufferSize);
-	vkUnmapMemory(_device, stagingBufferMemory);
-
-	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _indexBuffer, _indexBufferMemory);
-	copyBuffer(stagingBuffer, _indexBuffer, bufferSize);
-
-	vkDestroyBuffer(_device, stagingBuffer, nullptr);
-	vkFreeMemory(_device, stagingBufferMemory, nullptr);
-}
+// (createIndexBuffer removed)
 // this is a temporary one-time command buffer
 void Application::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
 {
@@ -662,29 +582,7 @@ void Application::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMe
 }
 
 // create a triangle vertex buffer
-void Application::createVertexBuffer()
-{
-	VkDeviceSize bufferSize = sizeof(_vertices[0]) * _vertices.size();
-	VkBuffer stagingBuffer;
-	VkDeviceMemory stagingBufferMemory;
-	// using staging buffer to copy the triangle vertices to the buffer
-	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-	// copy the triangle vertices to the buffer
-	// data is the temporary pointer to the GPU memory
-	// usually the GPU memory is not accessible by the CPU
-	// so we need to map the memory to the CPU
-	void *data;
-	vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
-	memcpy(data, _vertices.data(), bufferSize);
-	vkUnmapMemory(_device, stagingBufferMemory);
-
-	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _vertexBuffer, _vertexBufferMemory);
-	copyBuffer(stagingBuffer, _vertexBuffer, bufferSize);
-
-	vkDestroyBuffer(_device, stagingBuffer, nullptr);
-	vkFreeMemory(_device, stagingBufferMemory, nullptr);
-}
+// (createVertexBuffer removed)
 
 void Application::cleanupSwapChain()
 {
@@ -895,30 +793,15 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 	scissor.extent = _swapChainExtent;
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[_currentFrame], 0, nullptr);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[_currentFrame], 0, nullptr);
 
-	auto ends_with = [](const std::string &s, const std::string &suffix){
-		return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
-	};
-	bool useSplats = ends_with(_modelPath, ".ply") && !_splatInstances.empty();
-
-	if (useSplats)
-	{
-		VkBuffer bufs[] = { _splatVertexBuffer, _splatInstanceBuffer };
-		VkDeviceSize offs[] = { 0, 0 };
-		vkCmdBindVertexBuffers(commandBuffer, 0, 2, bufs, offs);
-		struct { float w, h; } pc = { (float)_swapChainExtent.width, (float)_swapChainExtent.height };
-		vkCmdPushConstants(commandBuffer, _pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
-		vkCmdDraw(commandBuffer, 4, static_cast<uint32_t>(_splatInstances.size()), 0, 0);
-	}
-	else
-	{
-		VkBuffer vertexBuffers[] = {_vertexBuffer};
-		VkDeviceSize offsets[] = {0};
-		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-		vkCmdBindIndexBuffer(commandBuffer, _indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(_indices.size()), 1, 0, 0, 0);
-	}
+    // Splat-only draw
+    VkBuffer bufs[] = { _splatVertexBuffer, _splatInstanceBuffer };
+    VkDeviceSize offs[] = { 0, 0 };
+    vkCmdBindVertexBuffers(commandBuffer, 0, 2, bufs, offs);
+    struct { float w, h; } pc = { (float)_swapChainExtent.width, (float)_swapChainExtent.height };
+    vkCmdPushConstants(commandBuffer, _pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
+    vkCmdDraw(commandBuffer, 4, static_cast<uint32_t>(_splatInstances.size()), 0, 0);
 
 	vkCmdEndRenderPass(commandBuffer);
 	if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
@@ -1019,14 +902,8 @@ void Application::createRenderPass()
 
 void Application::createGraphicsPipeline()
 {
-	auto ends_with = [](const std::string &s, const std::string &suffix){
-		return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
-	};
-
-	bool useSplats = ends_with(_modelPath, ".ply");
-
-	auto vertShaderCode = shaderUtils::readFile(useSplats ? "/Users/naoyuki/vk_tutorial/shader/splat.vert.spv" : "/Users/naoyuki/vk_tutorial/shader/triangle.vert.spv");
-	auto fragShaderCode = shaderUtils::readFile(useSplats ? "/Users/naoyuki/vk_tutorial/shader/splat.frag.spv" : "/Users/naoyuki/vk_tutorial/shader/triangle.frag.spv");
+    auto vertShaderCode = shaderUtils::readFile("/Users/naoyuki/vk_tutorial/shader/splat.vert.spv");
+    auto fragShaderCode = shaderUtils::readFile("/Users/naoyuki/vk_tutorial/shader/splat.frag.spv");
 
 	VkShaderModule vertShaderModule = shaderUtils::createShaderModule(_device, vertShaderCode);
 	VkShaderModule fragShaderModule = shaderUtils::createShaderModule(_device, fragShaderCode);
@@ -1058,52 +935,40 @@ void Application::createGraphicsPipeline()
 	VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
 	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
-	VkVertexInputBindingDescription bindingDescs[2] = {};
-	VkVertexInputAttributeDescription attrDescs[7] = {};
-	if (useSplats)
-	{
-		// binding 0: quad corners vec2 per-vertex
-		bindingDescs[0].binding = 0;
-		bindingDescs[0].stride = sizeof(glm::vec2);
-		bindingDescs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-		// binding 1: instance data
-		bindingDescs[1].binding = 1;
-		bindingDescs[1].stride = sizeof(SplatInstance);
-		bindingDescs[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
-		vertexInputInfo.vertexBindingDescriptionCount = 2;
-		vertexInputInfo.pVertexBindingDescriptions = bindingDescs;
+    VkVertexInputBindingDescription bindingDescs[2] = {};
+    VkVertexInputAttributeDescription attrDescs[7] = {};
+    // binding 0: quad corners vec2 per-vertex
+    bindingDescs[0].binding = 0;
+    bindingDescs[0].stride = sizeof(glm::vec2);
+    bindingDescs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    // binding 1: instance data
+    bindingDescs[1].binding = 1;
+    bindingDescs[1].stride = sizeof(SplatInstance);
+    bindingDescs[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+    vertexInputInfo.vertexBindingDescriptionCount = 2;
+    vertexInputInfo.pVertexBindingDescriptions = bindingDescs;
 
-		// location 0: inCorner
-		attrDescs[0].binding = 0; attrDescs[0].location = 0; attrDescs[0].format = VK_FORMAT_R32G32_SFLOAT; attrDescs[0].offset = 0;
-		// location 1: inCenter
-		attrDescs[1].binding = 1; attrDescs[1].location = 1; attrDescs[1].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[1].offset = offsetof(SplatInstance, center);
-		// location 2: inColor
-		attrDescs[2].binding = 1; attrDescs[2].location = 2; attrDescs[2].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[2].offset = offsetof(SplatInstance, color);
-		// location 3: inRadius
-		attrDescs[3].binding = 1; attrDescs[3].location = 3; attrDescs[3].format = VK_FORMAT_R32_SFLOAT; attrDescs[3].offset = offsetof(SplatInstance, radius);
-		// location 4: inScale
-		attrDescs[4].binding = 1; attrDescs[4].location = 4; attrDescs[4].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[4].offset = offsetof(SplatInstance, scale);
-		// location 5: inQuat
-		attrDescs[5].binding = 1; attrDescs[5].location = 5; attrDescs[5].format = VK_FORMAT_R32G32B32A32_SFLOAT; attrDescs[5].offset = offsetof(SplatInstance, rot);
-		// location 6: inOpacity
-		attrDescs[6].binding = 1; attrDescs[6].location = 6; attrDescs[6].format = VK_FORMAT_R32_SFLOAT; attrDescs[6].offset = offsetof(SplatInstance, opacity);
-		vertexInputInfo.vertexAttributeDescriptionCount = 7;
-		vertexInputInfo.pVertexAttributeDescriptions = attrDescs;
-	}
-	else
-	{
-		auto vertexInputBindingDescription = Vertex::getBindingDescription();
-		auto vertexInputAttributeDescriptions = Vertex::getAttributeDescriptions();
-		vertexInputInfo.vertexBindingDescriptionCount = 1;
-		vertexInputInfo.pVertexBindingDescriptions = &vertexInputBindingDescription;
-		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributeDescriptions.size());
-		vertexInputInfo.pVertexAttributeDescriptions = vertexInputAttributeDescriptions.data();
-	}
+    // location 0: inCorner
+    attrDescs[0].binding = 0; attrDescs[0].location = 0; attrDescs[0].format = VK_FORMAT_R32G32_SFLOAT; attrDescs[0].offset = 0;
+    // location 1: inCenter
+    attrDescs[1].binding = 1; attrDescs[1].location = 1; attrDescs[1].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[1].offset = offsetof(SplatInstance, center);
+    // location 2: inColor
+    attrDescs[2].binding = 1; attrDescs[2].location = 2; attrDescs[2].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[2].offset = offsetof(SplatInstance, color);
+    // location 3: inRadius
+    attrDescs[3].binding = 1; attrDescs[3].location = 3; attrDescs[3].format = VK_FORMAT_R32_SFLOAT; attrDescs[3].offset = offsetof(SplatInstance, radius);
+    // location 4: inScale
+    attrDescs[4].binding = 1; attrDescs[4].location = 4; attrDescs[4].format = VK_FORMAT_R32G32B32_SFLOAT; attrDescs[4].offset = offsetof(SplatInstance, scale);
+    // location 5: inQuat
+    attrDescs[5].binding = 1; attrDescs[5].location = 5; attrDescs[5].format = VK_FORMAT_R32G32B32A32_SFLOAT; attrDescs[5].offset = offsetof(SplatInstance, rot);
+    // location 6: inOpacity
+    attrDescs[6].binding = 1; attrDescs[6].location = 6; attrDescs[6].format = VK_FORMAT_R32_SFLOAT; attrDescs[6].offset = offsetof(SplatInstance, opacity);
+    vertexInputInfo.vertexAttributeDescriptionCount = 7;
+    vertexInputInfo.pVertexAttributeDescriptions = attrDescs;
 
 	// input assembly
 	VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
 	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-	inputAssembly.topology = useSplats ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
 	inputAssembly.primitiveRestartEnable = VK_FALSE;
 
 	// viewport
@@ -1144,16 +1009,8 @@ void Application::createGraphicsPipeline()
 	// depth
 	VkPipelineDepthStencilStateCreateInfo depthStencil = {};
 	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-	if (useSplats)
-	{
-		depthStencil.depthTestEnable = VK_FALSE;
-		depthStencil.depthWriteEnable = VK_FALSE;
-	}
-	else
-	{
-		depthStencil.depthTestEnable = VK_TRUE;
-		depthStencil.depthWriteEnable = VK_TRUE;
-	}
+    depthStencil.depthTestEnable = VK_FALSE;
+    depthStencil.depthWriteEnable = VK_FALSE;
 	depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
 	depthStencil.depthBoundsTestEnable = VK_FALSE;
 	depthStencil.stencilTestEnable = VK_FALSE;
@@ -1161,21 +1018,14 @@ void Application::createGraphicsPipeline()
 	// blending
 	VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
 	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    if (useSplats)
-    {
-        // Step 4: premultiplied alpha blending like main.js
-        colorBlendAttachment.blendEnable = VK_TRUE;
-        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
-        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
-        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-    }
-	else
-	{
-		colorBlendAttachment.blendEnable = VK_FALSE;
-	}
+    // Premultiplied alpha blending like main.js
+    colorBlendAttachment.blendEnable = VK_TRUE;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
 	VkPipelineColorBlendStateCreateInfo colorBlending = {};
 	colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -1551,9 +1401,7 @@ Application::Application()
 	createDepthResources();
 	createFramebuffers();
 
-	loadModel();
-	createVertexBuffer();
-	createIndexBuffer();
+    loadModel();
 	createSplatBuffers();
 	createUniformBuffers();
 
@@ -1578,25 +1426,7 @@ Application::~Application()
 
 	cleanupSwapChain();
 
-	if (_vertexBuffer != VK_NULL_HANDLE)
-	{
-		vkDestroyBuffer(_device, _vertexBuffer, nullptr);
-	}
-
-	if (_vertexBufferMemory != VK_NULL_HANDLE)
-	{
-		vkFreeMemory(_device, _vertexBufferMemory, nullptr);
-	}
-
-	if (_indexBuffer != VK_NULL_HANDLE)
-	{
-		vkDestroyBuffer(_device, _indexBuffer, nullptr);
-	}
-
-	if (_indexBufferMemory != VK_NULL_HANDLE)
-	{
-		vkFreeMemory(_device, _indexBufferMemory, nullptr);
-	}
+    // (triangle buffers cleanup removed)
 
 	if (_splatVertexBuffer != VK_NULL_HANDLE)
 	{

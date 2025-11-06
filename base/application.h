@@ -78,13 +78,7 @@ private:
 	// CPU pointer to the GPU memory
 	std::vector<void *> _uniformBuffersMapped;
 
-	std::vector<Vertex> _vertices;
-	std::vector<uint32_t> _indices;
-	VkBuffer _vertexBuffer;
-	VkDeviceMemory _vertexBufferMemory;
-
-	VkBuffer _indexBuffer;
-	VkDeviceMemory _indexBufferMemory;
+    // (triangle mesh buffers removed)
 
 	VkDescriptorSetLayout _descriptorSetLayout;
 	std::vector<VkDescriptorSet> _descriptorSets;
@@ -136,8 +130,7 @@ private:
 	void cleanupSwapChain();
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	void recreateSwapChain();
-	void createIndexBuffer();
-	void createVertexBuffer();
+    // (triangle mesh buffer creators removed)
 	void createSplatBuffers();
 	// note that uniform buffers usually vary for each frame
 	void createUniformBuffers();

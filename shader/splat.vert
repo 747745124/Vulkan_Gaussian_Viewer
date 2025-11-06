@@ -1,5 +1,5 @@
 #version 450
-layout(binding = 0) uniform UniformBufferObject {
+layout(binding = 0) uniform MVPMatrix {
     mat4 model;
     mat4 view;
     mat4 proj;
@@ -91,11 +91,7 @@ void main() {
     vPosition = inCorner * 2.0; 
     vec2 vCenter = pos2d.xy / pos2d.w; // NDC 中心
     
-    // ** 修正 #1: gl_Position 使用 vPosition ([-2, 2]) **
-    // 转换: 像素偏移 -> NDC 偏移
-    // (pixel_offset / (viewport / 2.0)) = (pixel_offset * 2.0 / viewport)
-    
-    vec2 offset = (vPosition.x * majorAxis + vPosition.y * minorAxis) / pc.viewport;
+    vec2 offset = (vPosition.x * majorAxis + vPosition.y * minorAxis) * 2.0 / pc.viewport;
 
     gl_Position = vec4(vCenter + offset, 0.0, 1.0);
 }
