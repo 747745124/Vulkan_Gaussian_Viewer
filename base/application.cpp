@@ -376,19 +376,6 @@ void Application::handleInput()
 	// Camera roll (CCW/CW) using Z/X keys
 	if (_keyboardInput.keyStates[GLFW_KEY_Z] == GLFW_PRESS) _camRoll += _camTurnSpeed * dt;
 	if (_keyboardInput.keyStates[GLFW_KEY_X] == GLFW_PRESS) _camRoll -= _camTurnSpeed * dt;
-
-	// Debug: compute anisotropic ellipse on CPU for a few splats (press C)
-	if (_keyboardInput.keyStates[GLFW_KEY_C] == GLFW_PRESS) {
-		static bool printed = false;
-		if (!printed) {
-			debugComputeAnisoCPU(6);
-			printed = true;
-		}
-	} else {
-		// reset latch when key released
-		// allows re-printing on next press
-		static bool printed = false; printed = false;
-	}
 }
 
 void Application::createUniformBuffers()
