@@ -39,6 +39,7 @@ void Application::loadModel()
         {
         const float SH_C0 = 0.28209479177387814f;
         glm::vec3 baseColor = glm::vec3(0.25f) + SH_C0 * g.f_dc_0;
+		baseColor = glm::clamp(baseColor, 0.0f, 1.0f);
 
             SplatInstance inst{};
             inst.center = g.position;

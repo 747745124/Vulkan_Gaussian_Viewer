@@ -46,8 +46,8 @@ void main() {
         0.0, 0.0, inScale.z
     );
 
-    mat3 M = R * S;
-    mat3 Vrk = M * transpose(M);
+    mat3 M = S * R;
+    mat3 Vrk = transpose(M) * M;
 
     // --- 3. Calculate projected 2D covariance ---
     float fx = abs(ubo.proj[0][0]) * pc.viewport.x * 0.5;

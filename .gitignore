@@ -5,3 +5,4 @@ build/
 *.ply
 *.spv
 *.js
+resource/
